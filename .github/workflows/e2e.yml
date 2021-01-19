@@ -1,5 +1,5 @@
 name: e2e
-on: [pull_request]
+on: [pull_request, push]
 jobs:
   e2e-test-cloud:
     name: E2E test cloud (GitHub VM)

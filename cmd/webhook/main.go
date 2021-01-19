@@ -15,30 +15,34 @@
 package main
 
 import (
-	"context"
-	"crypto/tls"
 	"flag"
-	"fmt"
-	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/golang/glog"
-	netcache "github.com/k8snetworkplumbingwg/network-resources-injector/pkg/tools"
-	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/webhook"
-	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"github.com/pkg/errors"
+
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/auth"
+	netcache "github.com/k8snetworkplumbingwg/network-resources-injector/pkg/cache"
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/patch"
+	nriServer "github.com/k8snetworkplumbingwg/network-resources-injector/pkg/server"
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/service"
 )
 
 const (
 	defaultClientCa               = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-	userDefinedInjectionConfigMap = "nri-user-defined-injections"
+	readTo                        = 5 * time.Second
+	writeTo                       = 10 * time.Second
+	readHeaderTo                  = 1 * time.Second
+	serviceTo                     = 2 * time.Second
+	ciInterval                    = 30 * time.Second
 )
 
 func main() {
 	var namespace string
-	var clientCAPaths webhook.ClientCAFlags
+	var clientCAPaths auth.ClientCAFlags
 	/* load configuration */
 	port := flag.Int("port", 8443, "The port on which to serve.")
 	address := flag.String("bind-address", "0.0.0.0", "The IP address on which to listen for the --port port.")
@@ -60,6 +64,7 @@ func main() {
 	}
 
 	if len(clientCAPaths) == 0 {
+		glog.Warningf("no client CA paths added. Attempting to use kubernetes default '%s'", defaultClientCa)
 		clientCAPaths = append(clientCAPaths, defaultClientCa)
 	}
 
@@ -69,137 +74,65 @@ func main() {
 
 	glog.Infof("starting mutating admission controller for network resources injection")
 
-	keyPair, err := webhook.NewTlsKeypairReloader(*cert, *key)
+	nriServer.SetInjectHugepageDownApi(*injectHugepageDownApi)
+
+	nriServer.SetHonorExistingResources(*resourcesHonorFlag)
+
+	keyPair, err := auth.NewIdentity(*cert, *key)
 	if err != nil {
 		glog.Fatalf("error load certificate: %s", err.Error())
 	}
 
-	clientCaPool, err := webhook.NewClientCertPool(&clientCAPaths, *insecure)
+	clientCaPool, err := auth.NewClientCertPool(clientCAPaths, *insecure)
 	if err != nil {
 		glog.Fatalf("error loading client CA pool: '%s'", err.Error())
 	}
 
-	/* init API client */
-	clientset := webhook.SetupInClusterClient()
-
-	webhook.SetInjectHugepageDownApi(*injectHugepageDownApi)
-
-	webhook.SetHonorExistingResources(*resourcesHonorFlag)
-
-	err = webhook.SetResourceNameKeys(*resourceNameKeys)
-	if err != nil {
+	if err = nriServer.SetResourceNameKeys(*resourceNameKeys); err != nil {
 		glog.Fatalf("error in setting resource name keys: %s", err.Error())
 	}
 
-	//initialize webhook with cache
-	netAnnotationCache := netcache.Create()
-	netAnnotationCache.Start()
-	webhook.SetNetAttachDefCache(netAnnotationCache)
-
-	go func() {
-		/* register handlers */
-		var httpServer *http.Server
-
-		http.HandleFunc("/mutate", func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path != "/mutate" {
-				http.NotFound(w, r)
-				return
-			}
-			if r.Method != http.MethodPost {
-				http.Error(w, "Invalid HTTP verb requested", 405)
-				return
-			}
-			webhook.MutateHandler(w, r)
-		})
-
-		/* start serving */
-		httpServer = &http.Server{
-			Addr:              fmt.Sprintf("%s:%d", *address, *port),
-			ReadTimeout:       5 * time.Second,
-			WriteTimeout:      10 * time.Second,
-			MaxHeaderBytes:    1 << 20,
-			ReadHeaderTimeout: 1 * time.Second,
-			TLSConfig: &tls.Config{
-				ClientAuth:               webhook.GetClientAuth(*insecure),
-				MinVersion:               tls.VersionTLS12,
-				CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384},
-				ClientCAs:                clientCaPool.GetCertPool(),
-				PreferServerCipherSuites: true,
-				InsecureSkipVerify:       false,
-				CipherSuites: []uint16{
-					// tls 1.2
-					tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-					tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-					tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-					tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-					// tls 1.3 configuration not supported
-				},
-				GetCertificate: keyPair.GetCertificateFunc(),
-			},
-		}
-
-		err := httpServer.ListenAndServeTLS("", "")
-		if err != nil {
-			glog.Fatalf("error starting web server: %v", err)
-		}
-	}()
-
-	/* watch the cert file and restart http sever if the file updated. */
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		glog.Fatalf("error starting fsnotify watcher: %v", err)
-	}
-	defer watcher.Close()
-
-	certUpdated := false
-	keyUpdated := false
-
-	for {
-		watcher.Add(*cert)
-		watcher.Add(*key)
-
-		select {
-		case event, ok := <-watcher.Events:
-			if !ok {
-				continue
-			}
-			glog.V(2).Infof("watcher event: %v", event)
-			mask := fsnotify.Create | fsnotify.Rename | fsnotify.Remove |
-				fsnotify.Write | fsnotify.Chmod
-			if (event.Op & mask) != 0 {
-				glog.V(2).Infof("modified file: %v", event.Name)
-				if event.Name == *cert {
-					certUpdated = true
-				}
-				if event.Name == *key {
-					keyUpdated = true
-				}
-				if keyUpdated && certUpdated {
-					if err := keyPair.Reload(); err != nil {
-						glog.Fatalf("Failed to reload certificate: %v", err)
-					}
-					certUpdated = false
-					keyUpdated = false
-				}
-			}
-		case err, ok := <-watcher.Errors:
-			if !ok {
-				continue
-			}
-			glog.Infof("watcher error: %v", err)
-		case <-time.After(30 * time.Second):
-			cm, err := clientset.CoreV1().ConfigMaps(namespace).Get(
-				context.Background(), userDefinedInjectionConfigMap, metav1.GetOptions{})
-			if err != nil {
-				if !errors.IsNotFound(err) {
-					glog.Warningf("Failed to get configmap for user-defined injections: %v", err)
-					continue
-				}
-			}
-			webhook.SetCustomizedInjections(cm)
-		}
+	// initialize webhook with cache
+	netAnnotationCache := netcache.Create(serviceTo)
+	if err = netAnnotationCache.Run(); err != nil {
+		glog.Fatalf("starting NAD cache failed: '%s'", err.Error())
 	}
 
-	// TODO: find a way to stop cache, should we run the above block in a go routine and make main module
-	// to respond to terminate singal ?
+	kp := auth.NewKeyCertUpdater(keyPair, serviceTo)
+	if err = kp.Run(); err != nil {
+		err = combineError(err, netAnnotationCache.Quit())
+		glog.Fatalf("starting TLS key & cert file updater failed: '%s'", err.Error())
+	}
+
+	udi := patch.CreateUDIUpdater(namespace, ciInterval, serviceTo)
+	if err = udi.Run(); err != nil {
+		err = combineError(err, netAnnotationCache.Quit(), kp.Quit())
+		glog.Fatalf("starting user defined injection updater failed: '%s'", err.Error())
+	}
+
+	server := nriServer.NewMutateServer(*address, *port, *insecure, readTo, writeTo, readHeaderTo, serviceTo, clientCaPool,
+		keyPair)
+	if err = server.Run(); err != nil {
+		err = combineError(err, netAnnotationCache.Quit(), kp.Quit(), udi.Quit())
+		glog.Fatalf("starting HTTP server failed: '%s'", err.Error())
+	}
+
+	term := make(chan os.Signal, 1)
+	signal.Notify(term, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	/* Blocks until termination or TLS key/cert file updater or UDI updater or HTTP server signal occurs */
+	if err := service.Watch(term, netAnnotationCache, kp, udi, server); err != nil {
+		glog.Error(err.Error())
+	}
+}
+
+// combineError combines errors into one error message
+func combineError(errs ...error) (err error) {
+	for i := range errs {
+		if err == nil {
+			err = errs[i]
+		} else {
+			err = errors.Wrap(err, errs[i].Error())
+		}
+	}
+	return
 }

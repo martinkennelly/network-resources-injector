@@ -218,6 +218,7 @@ func GetMultiNetworks(nad []string, ns string, podName string) *corev1.Pod {
 
 //WaitForPodStateRunning waits for pod to enter running state
 func WaitForPodStateRunning(core coreclient.CoreV1Interface, podName, ns string, timeout, interval time.Duration) error {
+	time.Sleep(30 * time.Second)
 	return wait.PollImmediate(interval, timeout, func() (done bool, err error) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
