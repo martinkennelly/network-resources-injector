@@ -21,17 +21,20 @@ import (
 	"io/ioutil"
 	"net/http"
 	"reflect"
+	"os"
+	"os/signal"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 
 	"github.com/golang/glog"
 	cniv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
+	nri "github.com/k8snetworkplumbingwg/network-resources-injector/pkg/types"
 	"github.com/pkg/errors"
 	multus "gopkg.in/intel/multus-cni.v3/pkg/types"
 
-	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/types"
 	"k8s.io/api/admission/v1beta1"
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -870,7 +873,7 @@ func MutateHandler(w http.ResponseWriter, req *http.Request) {
 							hugepageResource := hugepageResourceData{
 								ResourceName:  "requests.hugepages-1Gi",
 								ContainerName: container.Name,
-								Path:          types.Hugepages1GRequestPath + "_" + container.Name,
+								Path:          nri.Hugepages1GRequestPath + "_" + container.Name,
 							}
 							hugepageResourceList = append(hugepageResourceList, hugepageResource)
 							found = true
@@ -879,7 +882,7 @@ func MutateHandler(w http.ResponseWriter, req *http.Request) {
 							hugepageResource := hugepageResourceData{
 								ResourceName:  "requests.hugepages-2Mi",
 								ContainerName: container.Name,
-								Path:          types.Hugepages2MRequestPath + "_" + container.Name,
+								Path:          nri.Hugepages2MRequestPath + "_" + container.Name,
 							}
 							hugepageResourceList = append(hugepageResourceList, hugepageResource)
 							found = true
@@ -890,7 +893,7 @@ func MutateHandler(w http.ResponseWriter, req *http.Request) {
 							hugepageResource := hugepageResourceData{
 								ResourceName:  "limits.hugepages-1Gi",
 								ContainerName: container.Name,
-								Path:          types.Hugepages1GLimitPath + "_" + container.Name,
+								Path:          nri.Hugepages1GLimitPath + "_" + container.Name,
 							}
 							hugepageResourceList = append(hugepageResourceList, hugepageResource)
 							found = true
@@ -899,7 +902,7 @@ func MutateHandler(w http.ResponseWriter, req *http.Request) {
 							hugepageResource := hugepageResourceData{
 								ResourceName:  "limits.hugepages-2Mi",
 								ContainerName: container.Name,
-								Path:          types.Hugepages2MLimitPath + "_" + container.Name,
+								Path:          nri.Hugepages2MLimitPath + "_" + container.Name,
 							}
 							hugepageResourceList = append(hugepageResourceList, hugepageResource)
 							found = true
@@ -911,7 +914,7 @@ func MutateHandler(w http.ResponseWriter, req *http.Request) {
 					// so container knows its name and can process hugepages properly.
 					if found {
 						patch = createEnvPatch(patch, &container, containerIndex,
-							types.EnvNameContainerName, container.Name)
+							nri.EnvNameContainerName, container.Name)
 					}
 				}
 			}
@@ -1015,4 +1018,45 @@ func SetCustomizedInjections(injections *corev1.ConfigMap) {
 		glog.Infof("Removing stale entry: %v from user-defined injections", k)
 		delete(userDefinedPatchs, k)
 	}
+}
+
+//Watch blocks until either TLS cert & key watcher or HTTP server or termination signal generated
+func Watch(server nri.Service, watcher nri.Service, term chan os.Signal) (err error) {
+	signal.Notify(term, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	select {
+	case <-watcher.StatusSignal(): // when TLS cert & key watcher finishes unexpectedly
+		glog.Error("TLS key & cert watcher ended")
+		err = server.Quit()
+	case <-server.StatusSignal(): // when HTTP server finishes unexpectedly
+		glog.Error("HTTP server ended")
+		err = watcher.Quit()
+	case <-term: // when termination signal received
+		glog.Info("termination signal received")
+		err = combineError(server.Quit(), watcher.Quit())
+	}
+	return
+}
+
+//httpServerHandler limits HTTP server endpoint to /mutate and HTTP verb to POST only
+func httpServerHandler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != mServerEndpoint {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "Invalid HTTP verb requested", 405)
+		return
+	}
+	MutateHandler(w, r)
+}
+
+//combineError combines two errors into one error message
+func combineError(err1, err2 error) error {
+	if err1 != nil && err2 != nil {
+		return fmt.Errorf("two errors occured: 1) '%s' - 2) '%s'", err1.Error(), err2.Error())
+	}
+	if err1 != nil {
+		return err1
+	}
+	return err2
 }
