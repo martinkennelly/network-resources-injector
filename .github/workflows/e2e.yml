@@ -1,5 +1,5 @@
 name: e2e
-on: [push, pull_request]
+on: [pull_request, push]
 jobs:
   e2e-test:
     name: E2E test
@@ -17,4 +17,4 @@ jobs:
         run: source scripts/e2e_get_tools.sh && ./scripts/e2e_setup_cluster.sh
 
       - name: Execute E2E tests
-        run: go test -v ./test/e2e/...
+        run: go test -v -timeout 60m ./test/e2e/...

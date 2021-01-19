@@ -15,8 +15,8 @@
 package cache
 
 import (
+	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/golang/glog"
@@ -25,28 +25,49 @@ import (
 	"github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/informers/externalversions"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/channel"
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/service"
 )
 
 type NetAttachDefCache struct {
 	networkAnnotationsMap      map[string]map[string]string
 	networkAnnotationsMapMutex *sync.Mutex
-	stopper                    chan struct{}
-	isRunning                  int32
+	quit                       *channel.Channel
+	status                     *channel.Channel
+	timeout                    time.Duration
+	name                       string
 }
 
 type NetAttachDefCacheService interface {
-	Start()
-	Stop()
+	service.Service
 	Get(namespace string, networkName string) map[string]string
 }
 
-func Create() NetAttachDefCacheService {
-	return &NetAttachDefCache{make(map[string]map[string]string),
-		&sync.Mutex{}, make(chan struct{}), 0}
+const (
+	serviceName                   = "NAD cache"
+	chBufferSize                  = 1
+)
+
+var nadCache NetAttachDefCacheService
+
+func Create(timeout time.Duration) NetAttachDefCacheService {
+	nadCache = &NetAttachDefCache{make(map[string]map[string]string),
+		&sync.Mutex{}, nil, nil, timeout, serviceName}
+	return nadCache
 }
 
-// Start creates informer for NetworkAttachmentDefinition events and populate the local cache
-func (nc *NetAttachDefCache) Start() {
+func Get() NetAttachDefCacheService {
+	return nadCache
+}
+
+// Run creates informer for NetworkAttachmentDefinition events and populate the local cache
+func (nc *NetAttachDefCache) Run() error {
+	if nc.status != nil && nc.status.IsOpen() {
+		return fmt.Errorf("%s is running. Execute Quit() before Run()", serviceName)
+	}
+	nc.status = channel.NewChannel(chBufferSize)
+	nc.quit = channel.NewChannel(chBufferSize)
 	factory := externalversions.NewSharedInformerFactoryWithOptions(setupNetAttachDefClient(), 0, externalversions.WithNamespace(""))
 	informer := factory.K8sCniCncfIo().V1().NetworkAttachmentDefinitions().Informer()
 	// mutex to serialize the events.
@@ -79,29 +100,36 @@ func (nc *NetAttachDefCache) Start() {
 		},
 	})
 	go func() {
-		atomic.StoreInt32(&(nc.isRunning), int32(1))
-		// informer Run blocks until informer is stopped
 		glog.Infof("starting net-attach-def informer")
-		informer.Run(nc.stopper)
+		nc.quit.Open()
+		nc.status.Open()
+		defer nc.status.Close()
+		// informer Run blocks until informer is stopped
+		informer.Run(nc.quit.GetCh())
 		glog.Infof("net-attach-def informer is stopped")
-		atomic.StoreInt32(&(nc.isRunning), int32(0))
 	}()
+	return nc.status.WaitUntilOpened(nc.timeout)
 }
 
-// Stop teardown the NetworkAttachmentDefinition informer
-func (nc *NetAttachDefCache) Stop() {
-	close(nc.stopper)
-	tEnd := time.Now().Add(3 * time.Second)
-	for tEnd.After(time.Now()) {
-		if atomic.LoadInt32(&nc.isRunning) == 0 {
-			glog.Infof("net-attach-def informer is no longer running, proceed to clean up nad cache")
-			break
-		}
-		time.Sleep(600 * time.Millisecond)
-	}
+// Quit teardown the NetworkAttachmentDefinition informer
+func (nc *NetAttachDefCache) Quit() error {
+	glog.Info(fmt.Sprintf("terminating %s", nc.name))
+	nc.quit.Close()
 	nc.networkAnnotationsMapMutex.Lock()
 	nc.networkAnnotationsMap = nil
 	nc.networkAnnotationsMapMutex.Unlock()
+	return nc.status.WaitUntilClosed(nc.timeout)
+}
+
+// StatusSignal returns a channel which indicates whether the service is running or not.
+// channel closed indicates, it is not running.
+func (nc *NetAttachDefCache) StatusSignal() chan struct{} {
+	return nc.status.GetCh()
+}
+
+// GetName return service name
+func (nc *NetAttachDefCache) GetName() string {
+	return nc.name
 }
 
 func (nc *NetAttachDefCache) put(namespace, networkName string, annotations map[string]string) {
