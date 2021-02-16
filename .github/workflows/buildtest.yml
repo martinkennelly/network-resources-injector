@@ -20,8 +20,7 @@ jobs:
     
       - name: install goberalls
         run: go get github.com/mattn/goveralls
-  
- 
+   
       - name: Check out code into the Go module directory
         uses: actions/checkout@v2
 
@@ -33,11 +32,14 @@ jobs:
   
       - name: Build
         run: GOARCH="${TARGET}" ./scripts/build.sh
+        if: always()
   
       - name: Go test
         run: ./scripts/test.sh
+        if: success()
   
       - name: goveralls
         uses: shogo82148/actions-goveralls@v1
         with:
           path-to-profile: coverage.out
+          
