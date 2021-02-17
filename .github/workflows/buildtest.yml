@@ -13,7 +13,7 @@ jobs:
       TARGET: amd64
     steps:
       - name: Set up Go 1.13
-        uses: actions/setup-go@v1.1.3
+        uses: actions/setup-go@v1
         with:
           go-version: 1.13
         id: go
@@ -29,15 +29,14 @@ jobs:
   
       - name: go vet
         run: go vet ./...
+        continue-on-error: true
   
       - name: Build
         run: GOARCH="${TARGET}" ./scripts/build.sh
-        if: always()
-  
+          
       - name: Go test
         run: ./scripts/test.sh
-        if: success()
-  
+          
       - name: goveralls
         uses: shogo82148/actions-goveralls@v1
         with:
