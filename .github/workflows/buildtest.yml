@@ -28,17 +28,10 @@ jobs:
         run: go fmt ./...
   
       - name: go vet
-        run: go vet ./...
-        continue-on-error: true
+        run: go vet ./...       
   
       - name: Build
         run: GOARCH="${TARGET}" ./scripts/build.sh
           
       - name: Go test
         run: ./scripts/build.sh
-          
-      - name: goveralls
-        uses: shogo82148/actions-goveralls@v1
-        with:
-          path-to-profile: coverage.out
-          
