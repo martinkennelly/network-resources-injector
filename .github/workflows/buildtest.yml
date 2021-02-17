@@ -35,7 +35,7 @@ jobs:
         run: GOARCH="${TARGET}" ./scripts/build.sh
           
       - name: Go test
-        run: ./scripts/test.sh
+        run: ./scripts/build.sh
           
       - name: goveralls
         uses: shogo82148/actions-goveralls@v1
