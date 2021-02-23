@@ -53,7 +53,7 @@ done
 
 kubectl -n "${NAMESPACE}" create -f "${BASE_DIR}/deployments/service.yaml"
 export NAMESPACE
-cat "${BASE_DIR}/deployments/webhook.yaml" | \
+sed "${BASE_DIR}/deployments/webhook.yaml" | \
 	"${BASE_DIR}/scripts/webhook-patch-ca-bundle.sh" | \
 	sed -e "s|\${NAMESPACE}|${NAMESPACE}|g" | \
 	kubectl -n "${NAMESPACE}" create -f -
