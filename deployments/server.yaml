@@ -68,6 +68,8 @@ spec:
       capabilities:
         drop:
           - ALL
+      readOnlyRootFilesystem: true
+      allowPrivilegeEscalation: false
     volumeMounts:
     - name: tls
       mountPath: /etc/tls
