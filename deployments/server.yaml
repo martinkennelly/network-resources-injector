@@ -33,6 +33,16 @@ spec:
     - -tls-private-key-file=/etc/tls/tls.key
     - -tls-cert-file=/etc/tls/tls.crt
     - -logtostderr
+    readinnessProbe:
+      tcpSocket:
+        port: 8443
+      initialDelaySeconds: 2
+      periodSeconds: 2
+    livenessProbe:
+      tcpSocket:
+        port: 8443
+      initialDelaySeconds: 10
+      periodSeconds: 20
     securityContext:
       runAsUser: 10000
       runAsGroup: 10000
