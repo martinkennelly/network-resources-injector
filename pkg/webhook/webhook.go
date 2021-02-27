@@ -15,10 +15,12 @@
 package webhook
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -831,4 +833,25 @@ func SetInjectHugepageDownApi(hugepageFlag bool) {
 // SetHonorExistingResources initialize the honorExistingResources flag
 func SetHonorExistingResources(resourcesHonorFlag bool) {
 	honorExistingResources = resourcesHonorFlag
+}
+
+//Logger filters liveness / readinness probes connections for NRI log output from mutate HTTP server endpoint
+func Logger() *log.Logger {
+	buffer := new(bytes.Buffer)
+	logger := log.New(buffer, "nri-http-server-", 0)
+	go func() {
+		for {
+			if buffer.Len() > 0 {
+				line, err := buffer.ReadString('\n')
+				if err != nil {
+					log.Printf("[HTTP server logger]: ", err)
+					continue
+				}
+				if !strings.Contains(line, "EOF") {
+					log.Print(line)
+				}
+			}
+		}
+	}()
+	return logger
 }

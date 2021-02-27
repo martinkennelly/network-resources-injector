@@ -101,6 +101,7 @@ func main() {
 			WriteTimeout:      10 * time.Second,
 			MaxHeaderBytes:    1 << 20,
 			ReadHeaderTimeout: 1 * time.Second,
+			ErrorLog: webhook.Logger(),
 			TLSConfig: &tls.Config{
 				ClientAuth:               webhook.GetClientAuth(*insecure),
 				MinVersion:               tls.VersionTLS12,
