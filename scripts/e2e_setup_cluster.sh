@@ -143,7 +143,12 @@ retry kubectl -n kube-system wait --for=condition=ready -l name="${CNIS_NAME}" p
 echo "## install NRI"
 retry kubectl create -f "${root}/deployments/auth.yaml"
 retry kubectl create -f "${root}/deployments/server.yaml"
-retry kubectl -n kube-system wait --for=condition=ready -l app="${APP_NAME}" pod --timeout=300s
+if ! retry kubectl -n kube-system wait --for=condition=ready -l app="${APP_NAME}" pod --timeout=300s
+then
+  echo "### failed to wait for NRI to be ready"
+  kubectl -n kube-system describe pod "${APP_NAME}"
+  exit 1
+fi
 echo "## create network foo"
 create_foo_network
 sleep 5
