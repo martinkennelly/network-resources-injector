@@ -20,6 +20,10 @@ metadata:
   name: network-resources-injector
   namespace: kube-system
 spec:
+  securityContext:
+    runAsUser: 10000
+    runAsGroup: 10000
+    runAsNonRoot: true
   serviceAccount: network-resources-injector-sa
   containers:
   - name: webhook-server
@@ -34,8 +38,6 @@ spec:
     - -tls-cert-file=/etc/tls/tls.crt
     - -logtostderr
     securityContext:
-      runAsUser: 10000
-      runAsGroup: 10000
       capabilities:
         drop:
           - ALL
@@ -63,8 +65,6 @@ spec:
     - -namespace=kube-system
     - -alsologtostderr
     securityContext:
-      runAsUser: 10000
-      runAsGroup: 10000
     volumeMounts:
     - name: tls
       mountPath: /etc/tls
