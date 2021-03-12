@@ -65,6 +65,9 @@ spec:
     securityContext:
       runAsUser: 10000
       runAsGroup: 10000
+      capabilities:
+        drop:
+          - ALL
     volumeMounts:
     - name: tls
       mountPath: /etc/tls
