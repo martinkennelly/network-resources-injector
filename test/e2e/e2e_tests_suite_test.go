@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	networkCoreClient "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/client/clientset/versioned/typed/k8s.cni.cncf.io/v1"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	coreclient "k8s.io/client-go/kubernetes/typed/core/v1"
@@ -13,26 +14,31 @@ import (
 	"k8s.io/client-go/util/homedir"
 )
 
-
 const (
+	defaultPodName     = "nri-e2e-test"
 	testNetworkName    = "foo-network"
 	testNetworkResName = "example.com/foo"
 	interval           = time.Second * 10
 	timeout            = time.Second * 30
 )
 
+type ClientSet struct {
+	coreclient.CoreV1Interface
+}
+
+type NetworkClientSet struct {
+	networkCoreClient.K8sCniCncfIoV1Interface
+}
+
 var (
 	master         *string
 	kubeConfigPath *string
 	testNs         *string
 	cs             *ClientSet
+	networkClient  *NetworkClientSet
 )
 
-type ClientSet struct {
-	coreclient.CoreV1Interface
-}
-
-func init()  {
+func init() {
 	if home := homedir.HomeDir(); home != "" {
 		kubeConfigPath = flag.String("kubeconfig", filepath.Join(home, ".kube", "config"), "path to your kubeconfig file")
 	} else {
@@ -53,6 +59,9 @@ var _ = BeforeSuite(func(done Done) {
 
 	cs = &ClientSet{}
 	cs.CoreV1Interface = coreclient.NewForConfigOrDie(cfg)
+
+	networkClient = &NetworkClientSet{}
+	networkClient.K8sCniCncfIoV1Interface = networkCoreClient.NewForConfigOrDie(cfg)
 
 	close(done)
 }, 60)
