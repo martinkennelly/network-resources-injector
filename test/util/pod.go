@@ -47,19 +47,19 @@ func UpdatePodInfo(ci coreclient.CoreV1Interface, pod *corev1.Pod, timeout time.
 }
 
 //GetPodDefinition will return a test pod
-func GetPodDefinition(ns string) *corev1.Pod {
+func GetPodDefinition(ns string, podName string) *corev1.Pod {
 	var graceTime int64 = 0
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "nri-e2e-test",
-			Namespace:    ns,
+			Name:      podName,
+			Namespace: ns,
 		},
 		Spec: corev1.PodSpec{
 			TerminationGracePeriodSeconds: &graceTime,
 			Containers: []corev1.Container{
 				{
-					Name: "test",
-					Image: GetPodTestImage(),
+					Name:    "test",
+					Image:   GetPodTestImage(),
 					Command: []string{"/bin/sh", "-c", "sleep INF"},
 				},
 			},
@@ -68,21 +68,21 @@ func GetPodDefinition(ns string) *corev1.Pod {
 }
 
 //GetOneNetwork add one network to pod
-func GetOneNetwork(nad, ns string) *corev1.Pod {
-	pod := GetPodDefinition(ns)
+func GetOneNetwork(nad, ns string, podName string) *corev1.Pod {
+	pod := GetPodDefinition(ns, podName)
 	pod.Annotations = map[string]string{"k8s.v1.cni.cncf.io/networks": nad}
 	return pod
 }
 
 //GetMultiNetworks adds a network to annotation
-func GetMultiNetworks(nad []string, ns string) *corev1.Pod {
-	pod := GetPodDefinition(ns)
+func GetMultiNetworks(nad []string, ns string, podName string) *corev1.Pod {
+	pod := GetPodDefinition(ns, podName)
 	pod.Annotations = map[string]string{"k8s.v1.cni.cncf.io/networks": strings.Join(nad, ",")}
 	return pod
 }
 
 //WaitForPodStateRunning waits for pod to enter running state
-func WaitForPodStateRunning(core coreclient.CoreV1Interface , podName, ns string, timeout, interval time.Duration) error {
+func WaitForPodStateRunning(core coreclient.CoreV1Interface, podName, ns string, timeout, interval time.Duration) error {
 	time.Sleep(30 * time.Second)
 	return wait.PollImmediate(interval, timeout, func() (done bool, err error) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)

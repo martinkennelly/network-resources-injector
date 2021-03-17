@@ -21,6 +21,12 @@ MULTUS_NAME="multus"
 CNIS_DAEMONSET_URL="https://raw.githubusercontent.com/intel/multus-cni/master/e2e/cni-install.yml"
 CNIS_NAME="cni-plugins"
 TEST_NAMESPACE="default"
+# array with the KinD workers
+KIND_WORKER_NAMES=( kind-worker kind-worker2 )
+# If set to 1, network attachment definition will contains resource constraint
+IS_NRI_RESOURCE=0
+# If set to 1, network attachment definition will contains node selector constraint
+IS_NRI_NODE_SELECTOR=1
 
 # create cluster CA and API server admission configuration
 # to force API server and NRI authentication.
@@ -51,23 +57,36 @@ generate_k8_api_data() {
 
 create_cluster() {
   [ -z "${mount_dir}" ] && echo "### no mount directory set" && exit 1
+
+  # create list of worker nodes
+  workers="$(for i in "${KIND_WORKER_NAMES[@]}"; do echo "  - role: worker"; done)"
+
+  # create KinD configuration file
+  exec 3<> "${PWD}"/kindConfig.yaml
+
+    # Let's print Kind configuration to file to fd 3
+    echo "kind: Cluster" >&3
+    echo "apiVersion: kind.x-k8s.io/v1alpha4" >&3
+    echo "kubeadmConfigPatches:" >&3
+    echo "- |" >&3
+    echo "  kind: ClusterConfiguration" >&3
+    echo "  apiServer:" >&3
+    echo "    extraArgs:" >&3
+    echo "      admission-control-config-file: /etc/kubernetes/pki/ac.yaml" >&3
+    echo "nodes:" >&3
+    echo "  - role: control-plane" >&3
+    echo "    extraMounts:" >&3
+    echo "    - hostPath: \"${mount_dir:?}\"" >&3
+    echo "      containerPath: \"/etc/kubernetes/pki\"" >&3
+    echo "${workers}" >&3
+
+  # Close fd 3
+  exec 3>&-
+
   # deploy cluster with kind
-  cat <<EOF | kind create cluster --config=-
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-kubeadmConfigPatches:
-- |
-  kind: ClusterConfiguration
-  apiServer:
-    extraArgs:
-      admission-control-config-file: /etc/kubernetes/pki/ac.yaml
-nodes:
-  - role: control-plane
-    extraMounts:
-    - hostPath: "${mount_dir:?}"
-      containerPath: "/etc/kubernetes/pki"
-  - role: worker
-EOF
+  kind create cluster --config="${PWD}"/kindConfig.yaml
+
+  rm "${PWD}"/kindConfig.yaml
 }
 
 retry() {
@@ -101,22 +120,46 @@ check_requirements() {
 }
 
 create_foo_network() {
-cat <<EOF | kubectl apply -f -
-apiVersion: k8s.cni.cncf.io/v1
-kind: NetworkAttachmentDefinition
-metadata:
-  annotations:
-    k8s.v1.cni.cncf.io/resourceName: example.com/foo
-  name: foo-network
-  namespace: ${TEST_NAMESPACE}
-spec:
-  config: |
-    {
-      "cniVersion": "0.3.0",
-      "name": "foo-network",
-      "type": "loopback"
-    }
-EOF
+  # create network attachment definition file
+  exec 3<> "${PWD}"/crdConfig.yaml
+
+  # Let's print Kind configuration to file to fd 3
+  echo "apiVersion: k8s.cni.cncf.io/v1" >&3
+  echo "kind: NetworkAttachmentDefinition" >&3
+  echo "metadata:" >&3
+  echo "  annotations:" >&3
+
+  if [ $IS_NRI_RESOURCE -eq 1 ]; then
+    echo "    k8s.v1.cni.cncf.io/resourceName: example.com/foo" >&3
+  fi
+  if [ $IS_NRI_NODE_SELECTOR -eq 1 ]; then
+    echo "    k8s.v1.cni.cncf.io/nodeSelector: kubernetes.io/hostname=kind-worker2" >&3
+  fi
+
+  echo "  name: foo-network" >&3
+  echo "  namespace: ${TEST_NAMESPACE}" >&3
+  echo "spec:" >&3
+  echo "  config: |" >&3
+  echo "    {" >&3
+  echo "      \"cniVersion\": \"0.3.0\"," >&3
+  echo "      \"name\": \"foo-network\"," >&3
+  echo "      \"type\": \"loopback\"" >&3
+  echo "  " >&3
+
+  # Close fd 3
+  exec 3>&-
+
+  # apply network attachment definition to cluster
+  kubectl apply -f "${PWD}"/crdConfig.yaml
+
+  rm "${PWD}"/crdConfig.yaml
+}
+
+patch_kind_node() {
+  echo "## Adding capacity of example.com/foo to $1 node"
+  curl -g --retry ${RETRY_MAX} --retry-delay ${INTERVAL} --connect-timeout ${TIMEOUT}  --header "Content-Type: application/json-patch+json" \
+    --request PATCH --data '[{"op": "add", "path": "/status/capacity/example.com~1foo", "value": "100"}]' \
+    http://127.0.0.1:8001/api/v1/nodes/"$1"/status > /dev/null
 }
 
 echo "## checking requirements"
@@ -126,6 +169,8 @@ echo "## generating K8 api flags files"
 generate_k8_api_data
 echo "## start Kind cluster with precreated CA key/cert"
 create_cluster
+echo "## remove taints from master node"
+kubectl taint nodes kind-control-plane node-role.kubernetes.io/master:NoSchedule-
 echo "## build NRI"
 retry docker build -t "${APP_DOCKER_TAG}" "${root}"
 echo "## load NRI image into Kind"
@@ -151,9 +196,11 @@ echo "## starting kube proxy"
 nohup kubectl proxy -p=8001 > /dev/null 2>&1 &
 proxy_pid=$!
 sleep 1
+
 echo "## adding capacity of 4 example.com/foo to kind-worker node"
-curl -g --retry ${RETRY_MAX} --retry-delay ${INTERVAL} --connect-timeout ${TIMEOUT}  --header "Content-Type: application/json-patch+json" \
-  --request PATCH --data '[{"op": "add", "path": "/status/capacity/example.com~1foo", "value": "100"}]' \
-  http://127.0.0.1:8001/api/v1/nodes/kind-worker/status > /dev/null
+for (( i = 0; i < "${#KIND_WORKER_NAMES[@]}"; i++ )); do
+  patch_kind_node "${KIND_WORKER_NAMES[${i}]}"
+done
+
 echo "## killing kube proxy"
 kill $proxy_pid
