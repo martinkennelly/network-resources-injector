@@ -171,7 +171,6 @@ var _ = Describe("Node selector test", func() {
 	var err error
 
 	Context("Cluster node available", func() {
-
 		AfterEach(func() {
 			util.DeleteNetworkAttachmentDefinition(networkClient.K8sCniCncfIoV1Interface, testNetworkName, nad, timeout)
 			util.DeletePod(cs.CoreV1Interface, pod, timeout)
@@ -194,6 +193,7 @@ var _ = Describe("Node selector test", func() {
 			Expect(pod.Name).Should(Equal("nri-e2e-test-1"))
 			Expect(pod.Spec.NodeName).Should(Equal("kind-worker2"))
 			Expect(pod.Spec.NodeSelector).Should(Equal(map[string]string{"kubernetes.io/hostname": "kind-worker2"}))
+			Expect(pod.ObjectMeta.Namespace).Should(Equal(*testNs))
 		})
 
 		It("POD assigned to correct cluster node, node specified with resource name", func() {
@@ -212,9 +212,17 @@ var _ = Describe("Node selector test", func() {
 			Expect(pod.Name).Should(Equal("nri-e2e-test-2"))
 			Expect(pod.Spec.NodeName).Should(Equal("kind-worker2"))
 			Expect(pod.Spec.NodeSelector).Should(Equal(map[string]string{"kubernetes.io/hostname": "kind-worker2"}))
+			Expect(pod.ObjectMeta.Namespace).Should(Equal(*testNs))
+		})
+	})
+
+	Context("Cluster node not available", func() {
+		AfterEach(func() {
+			util.DeleteNetworkAttachmentDefinition(networkClient.K8sCniCncfIoV1Interface, testNetworkName, nad, timeout)
+			util.DeletePod(cs.CoreV1Interface, pod, timeout)
 		})
 
-		It("POD in pending state, cluster node is not available, without resource name", func() {
+		It("POD in pending state, only node selector passed without resource name", func() {
 			nad = util.GetNodeSelectorOnly(testNetworkName, *testNs, "kubernetes.io/hostname=kind-worker15")
 			err = util.ApplyNetworkAttachmentDefinition(networkClient.K8sCniCncfIoV1Interface, nad, timeout)
 			Expect(err).Should(BeNil())
@@ -233,7 +241,7 @@ var _ = Describe("Node selector test", func() {
 			Expect(pod.Spec.NodeSelector).Should(Equal(map[string]string{"kubernetes.io/hostname": "kind-worker15"}))
 		})
 
-		It("POD in pending state, cluster node is not available, with resource name", func() {
+		It("POD in pending state, node selector and resource name in CRD", func() {
 			nad = util.GetResourceAndNodeSelector(testNetworkName, *testNs, "kubernetes.io/hostname=kind-worker10")
 			err = util.ApplyNetworkAttachmentDefinition(networkClient.K8sCniCncfIoV1Interface, nad, timeout)
 			Expect(err).Should(BeNil())
