@@ -170,7 +170,7 @@ var _ = Describe("Node selector test", func() {
 	var nad *cniv1.NetworkAttachmentDefinition
 	var err error
 
-	Context("Cluster node available", func() {
+	Context("Cluster node available, default namespace", func() {
 		AfterEach(func() {
 			util.DeleteNetworkAttachmentDefinition(networkClient.K8sCniCncfIoV1Interface, testNetworkName, nad, timeout)
 			util.DeletePod(cs.CoreV1Interface, pod, timeout)
@@ -216,7 +216,7 @@ var _ = Describe("Node selector test", func() {
 		})
 	})
 
-	Context("Cluster node not available", func() {
+	Context("Cluster node not available, default namespace", func() {
 		AfterEach(func() {
 			util.DeleteNetworkAttachmentDefinition(networkClient.K8sCniCncfIoV1Interface, testNetworkName, nad, timeout)
 			util.DeletePod(cs.CoreV1Interface, pod, timeout)

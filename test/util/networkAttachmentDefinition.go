@@ -2,7 +2,6 @@ package util
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	cniv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
@@ -53,7 +52,6 @@ func GetNetworkAttachmentDefinition(networkName string, ns string) *cniv1.Networ
 // 			},
 func GetNetworkSpecConfig(networkName string) string {
 	config := "{\"cniVersion\": \"0.3.0\", \"name\": \"" + networkName + "\", \"type\":\"loopback\"}"
-	fmt.Println(config)
 	return config
 }
 
@@ -64,7 +62,6 @@ func ApplyNetworkAttachmentDefinition(ci networkCoreClient.K8sCniCncfIoV1Interfa
 	nad, err := ci.NetworkAttachmentDefinitions(nad.Namespace).Create(ctx, nad, metav1.CreateOptions{})
 
 	if err != nil {
-		fmt.Println("Error while creation: ", err)
 		return err
 	}
 
@@ -78,7 +75,6 @@ func DeleteNetworkAttachmentDefinition(ci networkCoreClient.K8sCniCncfIoV1Interf
 	err := ci.NetworkAttachmentDefinitions(nad.Namespace).Delete(ctx, testNetworkName, metav1.DeleteOptions{})
 
 	if err != nil {
-		fmt.Println("Error while deletion: ", err)
 		return err
 	}
 
