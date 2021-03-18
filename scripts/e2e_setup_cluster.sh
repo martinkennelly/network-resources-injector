@@ -119,42 +119,6 @@ check_requirements() {
   done
 }
 
-create_foo_network() {
-  # create network attachment definition file
-  exec 3<> "${PWD}"/crdConfig.yaml
-
-  # Let's print Kind configuration to file to fd 3
-  echo "apiVersion: k8s.cni.cncf.io/v1" >&3
-  echo "kind: NetworkAttachmentDefinition" >&3
-  echo "metadata:" >&3
-  echo "  annotations:" >&3
-
-  if [ $IS_NRI_RESOURCE -eq 1 ]; then
-    echo "    k8s.v1.cni.cncf.io/resourceName: example.com/foo" >&3
-  fi
-  if [ $IS_NRI_NODE_SELECTOR -eq 1 ]; then
-    echo "    k8s.v1.cni.cncf.io/nodeSelector: kubernetes.io/hostname=kind-worker2" >&3
-  fi
-
-  echo "  name: foo-network" >&3
-  echo "  namespace: ${TEST_NAMESPACE}" >&3
-  echo "spec:" >&3
-  echo "  config: |" >&3
-  echo "    {" >&3
-  echo "      \"cniVersion\": \"0.3.0\"," >&3
-  echo "      \"name\": \"foo-network\"," >&3
-  echo "      \"type\": \"loopback\"" >&3
-  echo "  " >&3
-
-  # Close fd 3
-  exec 3>&-
-
-  # apply network attachment definition to cluster
-  kubectl apply -f "${PWD}"/crdConfig.yaml
-
-  rm "${PWD}"/crdConfig.yaml
-}
-
 patch_kind_node() {
   echo "## Adding capacity of example.com/foo to $1 node"
   curl -g --retry ${RETRY_MAX} --retry-delay ${INTERVAL} --connect-timeout ${TIMEOUT}  --header "Content-Type: application/json-patch+json" \
@@ -189,8 +153,6 @@ echo "## install NRI"
 retry kubectl create -f "${root}/deployments/auth.yaml"
 retry kubectl create -f "${root}/deployments/server.yaml"
 retry kubectl -n kube-system wait --for=condition=ready -l app="${APP_NAME}" pod --timeout=300s
-echo "## create network foo"
-create_foo_network
 sleep 5
 echo "## starting kube proxy"
 nohup kubectl proxy -p=8001 > /dev/null 2>&1 &
