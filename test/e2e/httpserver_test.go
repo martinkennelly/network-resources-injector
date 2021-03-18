@@ -260,4 +260,57 @@ var _ = Describe("Node selector test", func() {
 			Expect(pod.Spec.NodeSelector).Should(Equal(map[string]string{"kubernetes.io/hostname": "kind-worker10"}))
 		})
 	})
+
+	Context("Cluster node available with custom namespace", func() {
+		var testNamespace string
+
+		BeforeEach(func() {
+			testNamespace = "mysterious"
+			err = util.CreateNamespace(cs.CoreV1Interface, testNamespace, timeout)
+			Expect(err).Should(BeNil())
+		})
+
+		AfterEach(func() {
+			err = util.DeleteNamespace(cs.CoreV1Interface, testNamespace, timeout)
+			Expect(err).Should(BeNil())
+		})
+
+		It("POD assigned to correct cluster node, only node specified without resource name", func() {
+			nad = util.GetNodeSelectorOnly(testNetworkName, testNamespace, "kubernetes.io/hostname=kind-worker2")
+			err = util.ApplyNetworkAttachmentDefinition(networkClient.K8sCniCncfIoV1Interface, nad, timeout)
+			Expect(err).Should(BeNil())
+
+			podName := defaultPodName + "-5"
+			pod = util.GetOneNetwork(testNetworkName, testNamespace, podName)
+			err = util.CreateRunningPod(cs.CoreV1Interface, pod, timeout, interval)
+			Expect(err).Should(BeNil())
+
+			pod, err = util.UpdatePodInfo(cs.CoreV1Interface, pod, timeout)
+			Expect(err).Should(BeNil())
+
+			Expect(pod.Name).Should(Equal("nri-e2e-test-5"))
+			Expect(pod.Spec.NodeName).Should(Equal("kind-worker2"))
+			Expect(pod.Spec.NodeSelector).Should(Equal(map[string]string{"kubernetes.io/hostname": "kind-worker2"}))
+			Expect(pod.ObjectMeta.Namespace).Should(Equal(testNamespace))
+		})
+
+		It("POD assigned to correct cluster node, node specified with resource name", func() {
+			nad = util.GetResourceAndNodeSelector(testNetworkName, testNamespace, "kubernetes.io/hostname=kind-worker2")
+			err = util.ApplyNetworkAttachmentDefinition(networkClient.K8sCniCncfIoV1Interface, nad, timeout)
+			Expect(err).Should(BeNil())
+
+			podName := defaultPodName + "-6"
+			pod = util.GetOneNetwork(testNetworkName, testNamespace, podName)
+			err = util.CreateRunningPod(cs.CoreV1Interface, pod, timeout, interval)
+			Expect(err).Should(BeNil())
+
+			pod, err = util.UpdatePodInfo(cs.CoreV1Interface, pod, timeout)
+			Expect(err).Should(BeNil())
+
+			Expect(pod.Name).Should(Equal("nri-e2e-test-6"))
+			Expect(pod.Spec.NodeName).Should(Equal("kind-worker2"))
+			Expect(pod.Spec.NodeSelector).Should(Equal(map[string]string{"kubernetes.io/hostname": "kind-worker2"}))
+			Expect(pod.ObjectMeta.Namespace).Should(Equal(testNamespace))
+		})
+	})
 })
