@@ -9,6 +9,57 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+var _ = Describe("Verify that resource and POD which consumes resource cannot be in different namespaces", func() {
+	var pod *corev1.Pod
+	var nad *cniv1.NetworkAttachmentDefinition
+	var err error
+
+	Context("network attachment definition configuration error", func() {
+		It("Missing network attachment definition, try to setup POD in default namespace", func() {
+			pod = util.GetOneNetwork(testNetworkName, *testNs, defaultPodName)
+			err = util.CreateRunningPod(cs.CoreV1Interface, pod, timeout, interval)
+			Expect(err).ShouldNot(BeNil())
+			Expect(err.Error()).Should(ContainSubstring("could not get Network Attachment Definition default/foo-network"))
+		})
+
+		It("Correct network name in CRD, but the namespace if different than in POD specification", func() {
+			testNamespace := "mysterious"
+			err = util.CreateNamespace(cs.CoreV1Interface, testNamespace, timeout)
+			Expect(err).Should(BeNil())
+
+			nad = util.GetResourceSelectorOnly(testNetworkName, testNamespace, testNetworkResName)
+			err = util.ApplyNetworkAttachmentDefinition(networkClient.K8sCniCncfIoV1Interface, nad, timeout)
+			Expect(err).Should(BeNil())
+
+			pod = util.GetOneNetwork(testNetworkName, *testNs, defaultPodName)
+			err = util.CreateRunningPod(cs.CoreV1Interface, pod, timeout, interval)
+			Expect(err).ShouldNot(BeNil())
+			Expect(err.Error()).Should(ContainSubstring("could not get Network Attachment Definition default/foo-network"))
+
+			err = util.DeleteNamespace(cs.CoreV1Interface, testNamespace, timeout)
+			Expect(err).Should(BeNil())
+		})
+
+		It("CRD in default namespace, and POD in custom namespace", func() {
+			testNamespace := "mysterious"
+			err = util.CreateNamespace(cs.CoreV1Interface, testNamespace, timeout)
+			Expect(err).Should(BeNil())
+
+			nad = util.GetResourceSelectorOnly(testNetworkName, *testNs, testNetworkResName)
+			err = util.ApplyNetworkAttachmentDefinition(networkClient.K8sCniCncfIoV1Interface, nad, timeout)
+			Expect(err).Should(BeNil())
+
+			pod = util.GetOneNetwork(testNetworkName, testNamespace, defaultPodName)
+			err = util.CreateRunningPod(cs.CoreV1Interface, pod, timeout, interval)
+			Expect(err).ShouldNot(BeNil())
+			Expect(err.Error()).Should(ContainSubstring("could not get Network Attachment Definition mysterious/foo-network"))
+
+			err = util.DeleteNamespace(cs.CoreV1Interface, testNamespace, timeout)
+			Expect(err).Should(BeNil())
+		})
+	})
+})
+
 var _ = Describe("Network injection testing", func() {
 	var pod *corev1.Pod
 	var nad *cniv1.NetworkAttachmentDefinition
