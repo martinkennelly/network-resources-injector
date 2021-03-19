@@ -17,9 +17,11 @@ func CreateRunningPod(ci coreclient.CoreV1Interface, pod *corev1.Pod, timeout, i
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	pod, err := ci.Pods(pod.Namespace).Create(ctx, pod, metav1.CreateOptions{})
+
 	if err != nil {
 		return err
 	}
+
 	err = WaitForPodStateRunning(ci, pod.ObjectMeta.Name, pod.ObjectMeta.Namespace, timeout, interval)
 	if err != nil {
 		return err
@@ -88,6 +90,7 @@ func WaitForPodStateRunning(core coreclient.CoreV1Interface, podName, ns string,
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		pod, err := core.Pods(ns).Get(ctx, podName, metav1.GetOptions{})
+
 		if err != nil {
 			return false, err
 		}
