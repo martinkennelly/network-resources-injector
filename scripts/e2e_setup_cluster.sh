@@ -23,10 +23,6 @@ CNIS_NAME="cni-plugins"
 TEST_NAMESPACE="default"
 # array with the KinD workers
 KIND_WORKER_NAMES=( kind-worker kind-worker2 )
-# If set to 1, network attachment definition will contains resource constraint
-IS_NRI_RESOURCE=0
-# If set to 1, network attachment definition will contains node selector constraint
-IS_NRI_NODE_SELECTOR=1
 
 # create cluster CA and API server admission configuration
 # to force API server and NRI authentication.
