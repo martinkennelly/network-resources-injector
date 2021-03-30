@@ -10,6 +10,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func GetWithoutAnnotations(ns string, networkName string) *cniv1.NetworkAttachmentDefinition {
+	nad := GetNetworkAttachmentDefinition(ns, networkName)
+
+	return nad
+}
+
 func GetResourceSelectorOnly(ns string, networkName string, resourceName string) *cniv1.NetworkAttachmentDefinition {
 	nad := GetNetworkAttachmentDefinition(ns, networkName)
 	nad.Annotations = map[string]string{"k8s.v1.cni.cncf.io/resourceName": "example.com/foo"}

@@ -63,6 +63,8 @@ create_cluster() {
     # Let's print Kind configuration to file to fd 3
     echo "kind: Cluster" >&3
     echo "apiVersion: kind.x-k8s.io/v1alpha4" >&3
+    echo "featureGates:" >&3
+    echo "  DownwardAPIHugePages: true" >&3
     echo "kubeadmConfigPatches:" >&3
     echo "- |" >&3
     echo "  kind: ClusterConfiguration" >&3
@@ -147,7 +149,7 @@ retry kubectl create -f "${CNIS_DAEMONSET_URL}"
 retry kubectl -n kube-system wait --for=condition=ready -l name="${CNIS_NAME}" pod --timeout=300s
 echo "## install NRI"
 retry kubectl create -f "${root}/deployments/auth.yaml"
-retry kubectl create -f "${root}/deployments/server.yaml"
+retry kubectl create -f "${root}/deployments/server_huge.yaml"
 retry kubectl -n kube-system wait --for=condition=ready -l app="${APP_NAME}" pod --timeout=300s
 sleep 5
 echo "## starting kube proxy"

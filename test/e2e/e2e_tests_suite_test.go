@@ -10,16 +10,19 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	coreclient "k8s.io/client-go/kubernetes/typed/core/v1"
+	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 )
 
 const (
-	defaultPodName     = "nri-e2e-test"
-	testNetworkName    = "foo-network"
-	testNetworkResName = "example.com/foo"
-	interval           = time.Second * 10
-	timeout            = time.Second * 30
+	defaultPodName      = "nri-e2e-test"
+	testNetworkName     = "foo-network"
+	pod1stContainerName = "test"
+	pod2ndContainerName = "second"
+	testNetworkResName  = "example.com/foo"
+	interval            = time.Second * 10
+	timeout             = time.Second * 30
 )
 
 type ClientSet struct {
@@ -36,6 +39,7 @@ var (
 	testNs         *string
 	cs             *ClientSet
 	networkClient  *NetworkClientSet
+	kubeConfig     *restclient.Config
 )
 
 func init() {
@@ -56,6 +60,8 @@ func TestSriovTests(t *testing.T) {
 var _ = BeforeSuite(func(done Done) {
 	cfg, err := clientcmd.BuildConfigFromFlags(*master, *kubeConfigPath)
 	Expect(err).Should(BeNil())
+
+	kubeConfig = cfg
 
 	cs = &ClientSet{}
 	cs.CoreV1Interface = coreclient.NewForConfigOrDie(cfg)

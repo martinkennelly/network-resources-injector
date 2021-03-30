@@ -1,15 +1,20 @@
 package util
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/kubernetes/scheme"
 	coreclient "k8s.io/client-go/kubernetes/typed/core/v1"
+	restclient "k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/remotecommand"
 )
 
 //CreateRunningPod create a pod and wait until it is running
@@ -26,6 +31,7 @@ func CreateRunningPod(ci coreclient.CoreV1Interface, pod *corev1.Pod, timeout, i
 	if err != nil {
 		return err
 	}
+
 	return nil
 }
 
@@ -69,10 +75,88 @@ func GetPodDefinition(ns string, podName string) *corev1.Pod {
 	}
 }
 
+// AddToPodDefinitionHugePages1Gi adds Hugepages 1Gi limits and requirements to the POD spec
+func AddToPodDefinitionHugePages1Gi(pod *corev1.Pod, amountLimit, amountRequest, containerNumber int64) *corev1.Pod {
+	if nil == pod.Spec.Containers[containerNumber].Resources.Limits {
+		pod.Spec.Containers[containerNumber].Resources.Limits = make(map[corev1.ResourceName]resource.Quantity)
+	}
+
+	if nil == pod.Spec.Containers[containerNumber].Resources.Requests {
+		pod.Spec.Containers[containerNumber].Resources.Requests = make(map[corev1.ResourceName]resource.Quantity)
+	}
+
+	pod.Spec.Containers[containerNumber].Resources.Limits["hugepages-1Gi"] = *resource.NewQuantity(amountLimit*1024*1024*1024, resource.BinarySI)
+	pod.Spec.Containers[containerNumber].Resources.Requests["hugepages-1Gi"] = *resource.NewQuantity(amountRequest*1024*1024*1024, resource.BinarySI)
+
+	return pod
+}
+
+// AddToPodDefinitionHugePages2Mi adds Hugepages 2Mi limits and requirements to the POD spec
+func AddToPodDefinitionHugePages2Mi(pod *corev1.Pod, amountLimit, amountRequest, containerNumber int64) *corev1.Pod {
+	if nil == pod.Spec.Containers[containerNumber].Resources.Limits {
+		pod.Spec.Containers[containerNumber].Resources.Limits = make(map[corev1.ResourceName]resource.Quantity)
+	}
+
+	if nil == pod.Spec.Containers[containerNumber].Resources.Requests {
+		pod.Spec.Containers[containerNumber].Resources.Requests = make(map[corev1.ResourceName]resource.Quantity)
+	}
+
+	pod.Spec.Containers[containerNumber].Resources.Limits["hugepages-2Mi"] = *resource.NewQuantity(amountLimit*1024*1024, resource.BinarySI)
+	pod.Spec.Containers[containerNumber].Resources.Requests["hugepages-2Mi"] = *resource.NewQuantity(amountRequest*1024*1024, resource.BinarySI)
+
+	return pod
+}
+
+// AddToPodDefinitionMemory adds Memory constraints to the POD spec
+func AddToPodDefinitionMemory(pod *corev1.Pod, amountLimit, amountRequest, containerNumber int64) *corev1.Pod {
+	if nil == pod.Spec.Containers[containerNumber].Resources.Limits {
+		pod.Spec.Containers[containerNumber].Resources.Limits = make(map[corev1.ResourceName]resource.Quantity)
+	}
+
+	if nil == pod.Spec.Containers[containerNumber].Resources.Requests {
+		pod.Spec.Containers[containerNumber].Resources.Requests = make(map[corev1.ResourceName]resource.Quantity)
+	}
+
+	pod.Spec.Containers[containerNumber].Resources.Limits["memory"] = *resource.NewQuantity(amountLimit*1024*1024*1024, resource.BinarySI)
+	pod.Spec.Containers[containerNumber].Resources.Requests["memory"] = *resource.NewQuantity(amountRequest*1024*1024*1024, resource.BinarySI)
+
+	return pod
+}
+
+// AddToPodDefinitionCpuLimits adds CPU limits and requests to the definition of POD
+func AddToPodDefinitionCpuLimits(pod *corev1.Pod, cpuNumber, containerNumber int64) *corev1.Pod {
+	if nil == pod.Spec.Containers[containerNumber].Resources.Limits {
+		pod.Spec.Containers[containerNumber].Resources.Limits = make(map[corev1.ResourceName]resource.Quantity)
+	}
+
+	if nil == pod.Spec.Containers[containerNumber].Resources.Requests {
+		pod.Spec.Containers[containerNumber].Resources.Requests = make(map[corev1.ResourceName]resource.Quantity)
+	}
+
+	pod.Spec.Containers[containerNumber].Resources.Limits["cpu"] = *resource.NewQuantity(cpuNumber, resource.DecimalSI)
+	pod.Spec.Containers[containerNumber].Resources.Requests["cpu"] = *resource.NewQuantity(cpuNumber, resource.DecimalSI)
+
+	return pod
+}
+
 //GetOneNetwork add one network to pod
 func GetOneNetwork(nad, ns string, podName string) *corev1.Pod {
 	pod := GetPodDefinition(ns, podName)
 	pod.Annotations = map[string]string{"k8s.v1.cni.cncf.io/networks": nad}
+	return pod
+}
+
+//GetOneNetworkTwoContainers returns POD with two containers and one network
+func GetOneNetworkTwoContainers(nad, ns, podName, secondContainerName string) *corev1.Pod {
+	pod := GetPodDefinition(ns, podName)
+	pod.Annotations = map[string]string{"k8s.v1.cni.cncf.io/networks": nad}
+
+	pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{
+		Name:    secondContainerName,
+		Image:   GetPodTestImage(),
+		Command: []string{"/bin/sh", "-c", "sleep INF"},
+	})
+
 	return pod
 }
 
@@ -85,7 +169,6 @@ func GetMultiNetworks(nad []string, ns string, podName string) *corev1.Pod {
 
 //WaitForPodStateRunning waits for pod to enter running state
 func WaitForPodStateRunning(core coreclient.CoreV1Interface, podName, ns string, timeout, interval time.Duration) error {
-	time.Sleep(30 * time.Second)
 	return wait.PollImmediate(interval, timeout, func() (done bool, err error) {
 		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
@@ -102,4 +185,47 @@ func WaitForPodStateRunning(core coreclient.CoreV1Interface, podName, ns string,
 		}
 		return false, nil
 	})
+}
+
+// ExecuteCommand execute command on the POD
+// :param core - core V1 Interface
+// :param config - configuration used to establish REST connection with K8s node
+// :param podName - POD name on which command has to be executed
+// :param ns - namespace in which POD exists
+// :param containerName - container name on which command should be executed
+// :param command - command to be executed on POD
+// :return string output of the command (stdout)
+// 	       string output of the command (stderr)
+//         error Error object or when everthing is correct nil
+func ExecuteCommand(core coreclient.CoreV1Interface, config *restclient.Config, podName, ns, containerName, command string) (string, string, error) {
+	shellCommand := []string{"/bin/sh", "-c", command}
+	request := core.RESTClient().Post().Resource("pods").Name(podName).Namespace(ns).SubResource("exec")
+	options := &corev1.PodExecOptions{
+		Command:   shellCommand,
+		Container: containerName,
+		Stdin:     false,
+		Stdout:    true,
+		Stderr:    true,
+		TTY:       false,
+	}
+
+	request.VersionedParams(options, scheme.ParameterCodec)
+	exec, err := remotecommand.NewSPDYExecutor(config, "POST", request.URL())
+	if nil != err {
+		return "", "", err
+	}
+
+	var stdout, stderr bytes.Buffer
+	err = exec.Stream(remotecommand.StreamOptions{
+		Stdin:  nil,
+		Stdout: &stdout,
+		Stderr: &stderr,
+		Tty:    false,
+	})
+
+	if nil != err {
+		return "", "", err
+	}
+
+	return stdout.String(), stderr.String(), nil
 }
