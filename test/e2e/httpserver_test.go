@@ -58,6 +58,9 @@ var _ = Describe("Verify that resource and POD which consumes resource cannot be
 
 			err = util.DeleteNamespace(cs.CoreV1Interface, testNamespace, timeout)
 			Expect(err).Should(BeNil())
+
+			err = util.DeleteNetworkAttachmentDefinition(networkClient.K8sCniCncfIoV1Interface, testNetworkName, nad, timeout)
+			Expect(err).Should(BeNil())
 		})
 	})
 })
@@ -83,7 +86,8 @@ var _ = Describe("Network injection testing", func() {
 
 		AfterEach(func() {
 			util.DeletePod(cs.CoreV1Interface, pod, timeout)
-			util.DeleteNetworkAttachmentDefinition(networkClient.K8sCniCncfIoV1Interface, testNetworkName, nad, timeout)
+			err = util.DeleteNetworkAttachmentDefinition(networkClient.K8sCniCncfIoV1Interface, testNetworkName, nad, timeout)
+			Expect(err).Should(BeNil())
 		})
 
 		It("should have one limit injected", func() {
