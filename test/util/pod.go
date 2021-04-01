@@ -75,6 +75,42 @@ func GetPodDefinition(ns string, podName string) *corev1.Pod {
 	}
 }
 
+//AddToPodDefinitionVolumesWithDownwardAPI adds to the POD specification at the 'path' downwardAPI volumes that expose POD namespace
+// :param pod - POD object to be modified
+// :param mountPath - path of the folder in which file is going to be available
+// :param volumeName - name of the volume
+// :param containerNumber - number of the container to which volumes have to be added
+// :return updated POD object
+func AddToPodDefinitionVolumesWithDownwardAPI(pod *corev1.Pod, mountPath, volumeName string, containerNumber int64) *corev1.Pod {
+	pod.Spec.Volumes = []corev1.Volume{
+		{
+			Name: volumeName,
+			VolumeSource: corev1.VolumeSource{
+				DownwardAPI: &corev1.DownwardAPIVolumeSource{
+					Items: []corev1.DownwardAPIVolumeFile{
+						{
+							Path: "namespace",
+							FieldRef: &corev1.ObjectFieldSelector{
+								FieldPath: "metadata.namespace",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	pod.Spec.Containers[containerNumber].VolumeMounts = []corev1.VolumeMount{
+		{
+			Name:      volumeName,
+			ReadOnly:  false,
+			MountPath: mountPath,
+		},
+	}
+
+	return pod
+}
+
 // AddToPodDefinitionHugePages1Gi adds Hugepages 1Gi limits and requirements to the POD spec
 func AddToPodDefinitionHugePages1Gi(pod *corev1.Pod, amountLimit, amountRequest, containerNumber int64) *corev1.Pod {
 	if nil == pod.Spec.Containers[containerNumber].Resources.Limits {

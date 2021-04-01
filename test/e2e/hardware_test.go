@@ -13,6 +13,96 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+var _ = Describe("POD in default namespace with downwarAPI already defined", func() {
+	var pod *corev1.Pod
+	var nad *cniv1.NetworkAttachmentDefinition
+	var err error
+	var stdoutString, stderrString string
+
+	Context("POD with resource name requests 1Gi hugepages, add namespace information via DownwardAPI", func() {
+		BeforeEach(func() {
+			stdoutString = ""
+			stderrString = ""
+
+			nad = util.GetResourceSelectorOnly(testNetworkName, *testNs, testNetworkResName)
+			err = util.ApplyNetworkAttachmentDefinition(networkClient.K8sCniCncfIoV1Interface, nad, timeout)
+			Expect(err).Should(BeNil())
+
+			pod = util.GetOneNetwork(testNetworkName, *testNs, defaultPodName)
+			pod = util.AddToPodDefinitionHugePages1Gi(pod, 2, 2, 0)
+			pod = util.AddToPodDefinitionMemory(pod, 2, 2, 0)
+		})
+
+		AfterEach(func() {
+			util.DeletePod(cs.CoreV1Interface, pod, timeout)
+			util.DeleteNetworkAttachmentDefinition(networkClient.K8sCniCncfIoV1Interface, testNetworkName, nad, timeout)
+		})
+
+		It("POD have downwardAPI defined to /etc/podnetinfo, so the same name and folder as NRI is using", func() {
+			pod = util.AddToPodDefinitionVolumesWithDownwardAPI(pod, "/etc/podnetinfo", "podnetinfo", 0)
+
+			err = util.CreateRunningPod(cs.CoreV1Interface, pod, timeout, interval)
+			Expect(err).ShouldNot(BeNil())
+			Expect(err.Error()).Should(ContainSubstring("Duplicate value: \"podnetinfo\""))
+
+			// This test fails by puprose, it should be possible to have podnetinfo defined already in POD spec before NRI will inject resources
+			// https://github.com/k8snetworkplumbingwg/network-resources-injector/issues/43
+			Expect(err).Should(BeNil())
+		})
+
+		It("POD have downwardAPI defined to /etc/podnetinfo, but volumeName is different than the one used by NRI", func() {
+			pod = util.AddToPodDefinitionVolumesWithDownwardAPI(pod, "/etc/podnetinfo", "something-else", 0)
+
+			err = util.CreateRunningPod(cs.CoreV1Interface, pod, timeout, interval)
+			Expect(err).ShouldNot(BeNil())
+			Expect(err.Error()).Should(ContainSubstring("Invalid value: \"/etc/podnetinfo\": must be unique"))
+
+			// This test fails by puprose, it should be possible to have podnetinfo defined already in POD spec before NRI will inject resources
+			// https://github.com/k8snetworkplumbingwg/network-resources-injector/issues/43
+			Expect(err).Should(BeNil())
+		})
+
+		It("POD have downwardAPI defined to /etc/somethingElse, but volumeName is the same as NRI is using", func() {
+			pod = util.AddToPodDefinitionVolumesWithDownwardAPI(pod, "/etc/somethingElse", "podnetinfo", 0)
+
+			err = util.CreateRunningPod(cs.CoreV1Interface, pod, timeout, interval)
+			Expect(err).ShouldNot(BeNil())
+			Expect(err.Error()).Should(ContainSubstring("Duplicate value: \"podnetinfo\""))
+
+			// This test fails by puprose, it should be possible to have podnetinfo defined already in POD spec before NRI will inject resources
+			// https://github.com/k8snetworkplumbingwg/network-resources-injector/issues/43
+			Expect(err).Should(BeNil())
+		})
+
+		It("POD have downwardAPI defined to /etc/somethingElse and other volumeName that the NRI is using", func() {
+			pod = util.AddToPodDefinitionVolumesWithDownwardAPI(pod, "/etc/somethingElse", "something-else", 0)
+
+			err = util.CreateRunningPod(cs.CoreV1Interface, pod, timeout, interval)
+			Expect(err).Should(BeNil())
+			Expect(pod.Name).ShouldNot(BeNil())
+
+			stdoutString, stderrString, err = util.ExecuteCommand(cs.CoreV1Interface, kubeConfig, pod.Name, *testNs, pod1stContainerName, "ls /etc/podnetinfo")
+			Expect(err).Should(BeNil())
+			Expect(stderrString).Should(Equal(""))
+			Expect(stdoutString).Should(ContainSubstring("hugepages_1G_limit_" + pod1stContainerName))
+			Expect(stdoutString).Should(ContainSubstring("hugepages_1G_request_" + pod1stContainerName))
+			Expect(stdoutString).ShouldNot(ContainSubstring("namespace"))
+
+			stdoutString, stderrString, err = util.ExecuteCommand(cs.CoreV1Interface, kubeConfig, pod.Name, *testNs, pod1stContainerName, "ls /etc/somethingElse")
+			Expect(err).Should(BeNil())
+			Expect(stderrString).Should(Equal(""))
+			Expect(stdoutString).ShouldNot(ContainSubstring("hugepages_1G_limit_" + pod1stContainerName))
+			Expect(stdoutString).ShouldNot(ContainSubstring("hugepages_1G_request_" + pod1stContainerName))
+			Expect(stdoutString).Should(ContainSubstring("namespace"))
+
+			stdoutString, stderrString, err = util.ExecuteCommand(cs.CoreV1Interface, kubeConfig, pod.Name, *testNs, pod1stContainerName, "cat /etc/somethingElse/namespace")
+			Expect(err).Should(BeNil())
+			Expect(stderrString).Should(Equal(""))
+			Expect(stdoutString).Should(Equal("default"))
+		})
+	})
+})
+
 var _ = Describe("Expose hugepages via Downward API, POD in default namespace", func() {
 	var pod *corev1.Pod
 	var nad *cniv1.NetworkAttachmentDefinition
