@@ -51,6 +51,27 @@ generate_k8_api_data() {
     "${mount_dir}/mutatingkubeconfig.yaml"
 }
 
+retry() {
+  local status=0
+  local retries=${RETRY_MAX:=5}
+  local delay=${INTERVAL:=5}
+  local to=${TIMEOUT:=20}
+  cmd="$*"
+
+  while [ $retries -gt 0 ]
+  do
+    status=0
+    timeout $to bash -c "echo $cmd && $cmd" || status=$?
+    if [ $status -eq 0 ]; then
+      break;
+    fi
+    echo "Exit code: '$status'. Sleeping '$delay' seconds before retrying"
+    sleep $delay
+    let retries--
+  done
+  return $status
+}
+
 create_cluster() {
   [ -z "${mount_dir}" ] && echo "### no mount directory set" && exit 1
 
@@ -82,30 +103,9 @@ create_cluster() {
   exec 3>&-
 
   # deploy cluster with kind
-  kind create cluster --config="${PWD}"/kindConfig.yaml
+  retry kind delete cluster && kind create cluster --config="${PWD}"/kindConfig.yaml
 
   rm "${PWD}"/kindConfig.yaml
-}
-
-retry() {
-  local status=0
-  local retries=${RETRY_MAX:=5}
-  local delay=${INTERVAL:=5}
-  local to=${TIMEOUT:=20}
-  cmd="$*"
-
-  while [ $retries -gt 0 ]
-  do
-    status=0
-    timeout $to bash -c "echo $cmd && $cmd" || status=$?
-    if [ $status -eq 0 ]; then
-      break;
-    fi
-    echo "Exit code: '$status'. Sleeping '$delay' seconds before retrying"
-    sleep $delay
-    let retries--
-  done
-  return $status
 }
 
 check_requirements() {
@@ -159,7 +159,7 @@ sleep 1
 
 echo "## adding capacity of 4 example.com/foo to kind-worker node"
 for (( i = 0; i < "${#KIND_WORKER_NAMES[@]}"; i++ )); do
-  patch_kind_node "${KIND_WORKER_NAMES[${i}]}"
+  patch_kind_node "${KIND_WORKER_NAMES[${i}]}" || true
 done
 
 echo "## killing kube proxy"
