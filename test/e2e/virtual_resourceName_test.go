@@ -1,4 +1,4 @@
-// +build all virtual
+// +build all virtual resourceName
 
 package e2e
 
@@ -38,6 +38,9 @@ var _ = Describe("Verify that resource and POD which consumes resource cannot be
 			Expect(err).ShouldNot(BeNil())
 			Expect(err.Error()).Should(ContainSubstring("could not get Network Attachment Definition default/foo-network"))
 
+			err = util.DeleteNetworkAttachmentDefinition(networkClient.K8sCniCncfIoV1Interface, testNetworkName, nad, timeout)
+			Expect(err).Should(BeNil())
+
 			err = util.DeleteNamespace(cs.CoreV1Interface, testNamespace, timeout)
 			Expect(err).Should(BeNil())
 		})
@@ -56,10 +59,10 @@ var _ = Describe("Verify that resource and POD which consumes resource cannot be
 			Expect(err).ShouldNot(BeNil())
 			Expect(err.Error()).Should(ContainSubstring("could not get Network Attachment Definition mysterious/foo-network"))
 
-			err = util.DeleteNamespace(cs.CoreV1Interface, testNamespace, timeout)
+			err = util.DeleteNetworkAttachmentDefinition(networkClient.K8sCniCncfIoV1Interface, testNetworkName, nad, timeout)
 			Expect(err).Should(BeNil())
 
-			err = util.DeleteNetworkAttachmentDefinition(networkClient.K8sCniCncfIoV1Interface, testNetworkName, nad, timeout)
+			err = util.DeleteNamespace(cs.CoreV1Interface, testNamespace, timeout)
 			Expect(err).Should(BeNil())
 		})
 	})
