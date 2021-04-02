@@ -18,7 +18,7 @@ func GetWithoutAnnotations(ns string, networkName string) *cniv1.NetworkAttachme
 
 func GetResourceSelectorOnly(ns string, networkName string, resourceName string) *cniv1.NetworkAttachmentDefinition {
 	nad := GetNetworkAttachmentDefinition(ns, networkName)
-	nad.Annotations = map[string]string{"k8s.v1.cni.cncf.io/resourceName": "example.com/foo"}
+	nad.Annotations = map[string]string{"k8s.v1.cni.cncf.io/resourceName": resourceName}
 
 	return nad
 }
@@ -34,7 +34,8 @@ func GetResourceAndNodeSelector(ns string, networkName string, nodeName string) 
 	nad := GetNetworkAttachmentDefinition(ns, networkName)
 	nad.Annotations = map[string]string{
 		"k8s.v1.cni.cncf.io/nodeSelector": nodeName,
-		"k8s.v1.cni.cncf.io/resourceName": "example.com/foo"}
+		"k8s.v1.cni.cncf.io/resourceName": "example.com/foo",
+	}
 
 	return nad
 }
@@ -65,7 +66,7 @@ func ApplyNetworkAttachmentDefinition(ci networkCoreClient.K8sCniCncfIoV1Interfa
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 
 	defer cancel()
-	nad, err := ci.NetworkAttachmentDefinitions(nad.Namespace).Create(ctx, nad, metav1.CreateOptions{})
+	_, err := ci.NetworkAttachmentDefinitions(nad.Namespace).Create(ctx, nad, metav1.CreateOptions{})
 
 	if err != nil {
 		return err

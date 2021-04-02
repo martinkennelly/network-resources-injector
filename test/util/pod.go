@@ -75,6 +75,19 @@ func GetPodDefinition(ns string, podName string) *corev1.Pod {
 	}
 }
 
+//AddMetadataLabel adds label to the POD metadata section
+// :param labelName - key in map, label name
+// :param labelContent - value, label content
+func AddMetadataLabel(pod *corev1.Pod, labelName, labelContent string) *corev1.Pod {
+	if nil == pod.ObjectMeta.Labels {
+		pod.ObjectMeta.Labels = make(map[string]string)
+	}
+
+	pod.ObjectMeta.Labels[labelName] = labelContent
+
+	return pod
+}
+
 //AddToPodDefinitionVolumesWithDownwardAPI adds to the POD specification at the 'path' downwardAPI volumes that expose POD namespace
 // :param pod - POD object to be modified
 // :param mountPath - path of the folder in which file is going to be available

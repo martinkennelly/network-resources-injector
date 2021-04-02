@@ -122,6 +122,10 @@ patch_kind_node() {
   curl -g --retry ${RETRY_MAX} --retry-delay ${INTERVAL} --connect-timeout ${TIMEOUT}  --header "Content-Type: application/json-patch+json" \
     --request PATCH --data '[{"op": "add", "path": "/status/capacity/example.com~1foo", "value": "100"}]' \
     http://127.0.0.1:8001/api/v1/nodes/"$1"/status > /dev/null
+
+  curl -g --retry ${RETRY_MAX} --retry-delay ${INTERVAL} --connect-timeout ${TIMEOUT}  --header "Content-Type: application/json-patch+json" \
+    --request PATCH --data '[{"op": "add", "path": "/status/capacity/example.com~1boo", "value": "100"}]' \
+    http://127.0.0.1:8001/api/v1/nodes/"$1"/status > /dev/null
 }
 
 echo "## checking requirements"
