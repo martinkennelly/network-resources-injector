@@ -130,6 +130,20 @@ In Kubernetes 1.20, an alpha feature was added to expose the requested hugepages
 Being alpha, this feature is disabled in Kubernetes by default.
 If enabled when Kubernetes is deployed via `FEATURE_GATES="DownwardAPIHugePages=true"`, then Network Resource Injector can be used to mutate the pod spec to publish the hugepage data to the container. To enable this functionality in Network Resource Injector, add ```--injectHugepageDownApi``` flag to webhook binary arguments (See [server.yaml](deployments/server.yaml)).
 
+> NOTE: Please note that the Network Resource Injector does not add hugepage resources to the POD specification. It means that user has to explicitly add it. This feature only exposes it to Downward API. More information about hugepages can be found within Kubernetes [specification](https://kubernetes.io/docs/tasks/manage-hugepages/scheduling-hugepages/). Snippet of how to request hugepage resources in pod spec:
+```
+spec:
+  containers:
+  - image: busybox
+    resources:
+      limits:
+        hugepages-1Gi: 2Gi
+        memory: 2Gi
+      requests:
+        hugepages-1Gi: 2Gi
+        memory: 2Gi
+```
+
 Like the other Downward API provided data, hugepage information for a pod can be located by an application at the path `/etc/podnetinfo/` in the container's file system.
 This directory will contain the request and limit information for 1Gi/2Mb.
 
@@ -178,6 +192,93 @@ spec:
  ..
  nodeSelector:
    master: eno3
+```
+
+### User Defined Injections
+
+User Defined injections allows user to define additional injections (besides what's supported in NRI, such as ResourceName, Downward API volumes etc) in Kubernetes ConfigMap and request additional injection for individual pod based on pod label. Currently user defined injection only support injecting pod annotations.
+
+In order to use this feature, user needs to create the user defined injection ConfigMap with name `nri-user-defined-injections` in the namespace where NRI was deployed in (`kube-system` namespace is used when there is no `NAMESPACE` environment variable passed to NRI). The data entry in ConfigMap is in the format of key:value pair. Key is a user defined label that will be used to match with pod labels, Value is the actual injection in the format as defined by [RFC6902](https://tools.ietf.org/html/rfc6902) that will be applied to pod manifest. NRI would listen to the creation/update/deletion of this ConfigMap and update its internal data structure every 30 seconds so that subsquential creation of pods will be evaluated against the latest user defined injections.
+
+Metadata.Annotations in Pod definition is the only supported field for customization, whose `path` should be "/metadata/annotations".
+
+Below is an example of user defined injection ConfigMap:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nri-user-defined-injections
+  namespace: kube-system
+data:
+  feature.pod.kubernetes.io/sriov-network: '{"op": "add", "path": "/metadata/annotations", "value": {"k8s.v1.cni.cncf.io/networks": "sriov-net-attach-def"}}'
+```
+
+`feature.pod.kubernetes.io/sriov-network` is a user defined label to request additional networks. Every pod that contains this label with a value set to `"true"` will be applied with the patch that's defined in the following json string.
+
+`'{"op": "add", "path": "/metadata/annotations", "value": {"k8s.v1.cni.cncf.io/networks": "sriov-net -attach-def"}}` defines how/where/what the patch shall be applied.
+
+`"op": "add"` is the action for user defined injection. In above case, it requests to add the `value` to `path` in pod manifests.
+
+`"path": "/metadata/annotations"` is the path in pod manifest to be updated.
+
+`"value": {"k8s.v1.cni.cncf.io/networks": "sriov-net-attach-def"}}` is the value to be updated in the given `path`.
+
+For a pod to request user defined injection, one of its labels shall match with the labels defined in user defined injection ConfigMap.
+For example, with the below pod manifest:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: testpod
+  labels:
+   feature.pod.kubernetes.io/sriov-network: "true"
+spec:
+  containers:
+  - name: app
+    image: centos:7
+    command: [ "/bin/bash", "-c", "--" ]
+    args: [ "while true; do sleep 300000; done;" ]
+```
+
+NRI would update pod manifest to:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: testpod
+  labels:
+   feature.pod.kubernetes.io/sriov-network: "true"
+  annotations:
+    k8s.v1.cni.cncf.io/networks: sriov-net-attach-def
+spec:
+  containers:
+  - name: app
+    image: centos:7
+    command: [ "/bin/bash", "-c", "--" ]
+    args: [ "while true; do sleep 300000; done;" ]
+```
+
+## Test
+### Unit tests
+
+```
+$ make test
+```
+
+### E2E tests using Kubernetes in Docker (KinD)
+Deploy KinD and run tests
+
+```
+$ make e2e
+```
+
+Cleanup KinD deployment
+
+```
+make e2e-clean
 ```
 
 ## Contact Us
