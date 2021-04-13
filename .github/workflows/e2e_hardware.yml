@@ -6,7 +6,7 @@ jobs:
   e2e-test:
     if: contains(github.event.pull_request.labels.*.name, 'hardware')
     name: E2E test on hardware
-    runs-on: [self-hosted, linux, hugepages]
+    runs-on: [self-hosted, Linux, hugepages]
     steps:
       - name: Set up Go version
         uses: actions/setup-go@v1
