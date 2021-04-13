@@ -1,9 +1,12 @@
-name: e2e
-on: [pull_request]
+name: e2e_hardware
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
 jobs:
   e2e-test:
-    name: E2E test
-    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.labels.*.name, 'hardware')
+    name: E2E test on hardware
+    runs-on: [self-hosted, Linux, hugepages]
     steps:
       - name: Set up Go version
         uses: actions/setup-go@v1
@@ -20,4 +23,7 @@ jobs:
         run: ./scripts/e2e_setup_cluster.sh
 
       - name: Execute E2E tests
-        run: go test -v -tags virtual -timeout 40m ./test/e2e/...
+        run: go test -v -tags hardware ./test/e2e/...
+
+      - name: Tear down KinD cluster
+        run: ./scripts/e2e_teardown_cluster.sh
