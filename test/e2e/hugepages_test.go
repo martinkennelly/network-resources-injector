@@ -1,5 +1,5 @@
 package e2e
-
+//a subset of tests require Hugepages enabled on the test node
 import (
 	"strconv"
 
