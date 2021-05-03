@@ -1,5 +1,3 @@
-// +build virtual custominjection
-
 package e2e
 
 import (

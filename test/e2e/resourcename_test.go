@@ -1,5 +1,3 @@
-// +build all virtual resourceName
-
 package e2e
 
 import (

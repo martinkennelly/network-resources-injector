@@ -1,5 +1,3 @@
-// +build all virtual nodeselector
-
 package e2e
 
 import (
