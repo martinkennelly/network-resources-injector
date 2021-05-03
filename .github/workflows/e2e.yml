@@ -1,8 +1,8 @@
 name: e2e
-on: [pull_request]
+on: [pull_request, push]
 jobs:
-  e2e-test-virtual:
-    name: E2E test
+  e2e-test-cloud:
+    name: E2E test cloud (GitHub VM)
     runs-on: ubuntu-latest
     steps:
       - name: Set up Go version
@@ -22,10 +22,10 @@ jobs:
       - name: Execute E2E tests
         run: go test -v -tags virtual -timeout 40m ./test/e2e/...
 
-  e2e-test-hardware:
-    name: E2E test on hardware
-    runs-on: [self-hosted, Linux, hugepages] # requires hugepages enabled locally
-    if: contains(github.event.pull_request.labels.*.name, 'hardware')
+  e2e-test-self-hosted:
+    name: E2E test self-hosted
+    runs-on: [self-hosted, Linux]
+    if: contains(github.event.pull_request.labels.*.name, 'self-hosted')
     steps:
       - name: Set up Go version
         uses: actions/setup-go@v1
