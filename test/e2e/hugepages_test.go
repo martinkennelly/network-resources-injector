@@ -1,6 +1,8 @@
 package e2e
+
 //a subset of tests require Hugepages enabled on the test node
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/k8snetworkplumbingwg/network-resources-injector/test/util"
@@ -11,11 +13,22 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+func hugepageOrSkip() {
+	available, err := util.IsMinHugepagesAvailable(cs.CoreV1Interface, minHugepages1Gi, minHugepages2Mi)
+	Expect(err).To(BeNil())
+	if !available {
+		Skip(fmt.Sprintf("minimum hugepages of %d Gi and %d Mi not found in any k8 workner nodes.",
+			minHugepages1Gi, minHugepages2Mi))
+	}
+}
+
 var _ = Describe("POD in default namespace with downwarAPI already defined", func() {
 	var pod *corev1.Pod
 	var nad *cniv1.NetworkAttachmentDefinition
 	var err error
 	var stdoutString, stderrString string
+
+	BeforeEach(hugepageOrSkip)
 
 	Context("POD with resource name requests 1Gi hugepages, add namespace information via DownwardAPI", func() {
 		BeforeEach(func() {
@@ -106,6 +119,8 @@ var _ = Describe("Expose hugepages via Downward API, POD in default namespace", 
 	var nad *cniv1.NetworkAttachmentDefinition
 	var err error
 	var stdoutString, stderrString string
+
+	BeforeEach(hugepageOrSkip)
 
 	Context("Check in environment where it is possible to create hugepages", func() {
 		BeforeEach(func() {
