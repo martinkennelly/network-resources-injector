@@ -24,6 +24,7 @@ jobs:
 
   e2e-test-self-hosted:
     name: E2E test self-hosted
+    environment: nri-maintainers
     runs-on: [self-hosted, Linux]
     if: contains(github.event.pull_request.labels.*.name, 'self-hosted')
     steps:
