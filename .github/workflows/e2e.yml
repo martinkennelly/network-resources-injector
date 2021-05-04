@@ -45,4 +45,5 @@ jobs:
         run: go test -timeout 60m ./test/e2e/...
 
       - name: Tear down KinD cluster
+        if: always()
         run: ./scripts/e2e_teardown_cluster.sh
