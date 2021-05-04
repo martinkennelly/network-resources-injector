@@ -23,7 +23,7 @@ const (
 	testNetworkResName  = "example.com/foo"
 	interval            = time.Second * 10
 	timeout             = time.Second * 30
-	minHugepages1Gi     = 3
+	minHugepages1Gi     = 2
 	minHugepages2Mi     = 1024
 )
 
