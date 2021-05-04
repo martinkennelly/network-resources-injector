@@ -20,12 +20,12 @@ jobs:
         run: ./scripts/e2e_setup_cluster.sh
 
       - name: Execute E2E tests
-        run: go test -v -tags virtual -timeout 40m ./test/e2e/...
+        run: go test -timeout 60m ./test/e2e/...
 
   e2e-test-self-hosted:
     name: E2E test self-hosted
     environment: nri-maintainers
-    runs-on: [self-hosted, Linux]
+    runs-on: [self-hosted, Linux, hugepages]
     steps:
       - name: Set up Go version
         uses: actions/setup-go@v1
@@ -42,7 +42,7 @@ jobs:
         run: ./scripts/e2e_setup_cluster.sh
 
       - name: Execute E2E tests
-        run: go test -v -tags hardware ./test/e2e/...
+        run: go test -timeout 60m ./test/e2e/...
 
       - name: Tear down KinD cluster
         run: ./scripts/e2e_teardown_cluster.sh
