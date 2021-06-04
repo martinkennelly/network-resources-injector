@@ -22,13 +22,16 @@ image :
 test :
 	scripts/test.sh
 
+lint :
+	scripts/lint.sh
+
 vendor :
 	go mod tidy && go mod vendor
 
 e2e:
 	scripts/e2e_get_tools.sh
 	scripts/e2e_setup_cluster.sh
-	go test ./test/e2e/...
+	go test -timeout 40m -v ./test/e2e/...
 
 e2e-clean:
 	scripts/e2e_teardown_cluster.sh
