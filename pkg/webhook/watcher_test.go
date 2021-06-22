@@ -22,7 +22,7 @@ var _ = Describe("cert & key watcher", func() {
 	)
 	var (
 		keyPair *nriMocks.KeyReloader
-		kcw     *keyPairWatcher
+		kcw     *keyPair
 		certF   *os.File
 		keyF    *os.File
 	)
@@ -30,7 +30,7 @@ var _ = Describe("cert & key watcher", func() {
 		keyPair = &nriMocks.KeyReloader{}
 		certF, _ = ioutil.TempFile(TempDir, certFName)
 		keyF, _ = ioutil.TempFile(TempDir, keyFName)
-		kcw = &keyPairWatcher{nil, nil, to, keyPair}
+		kcw = &keyPair{nil, nil, to, keyPair}
 		keyPair.On("GetCertPath").Return(certF.Name())
 		keyPair.On("GetKeyPath").Return(keyF.Name())
 	})

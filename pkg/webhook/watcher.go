@@ -11,22 +11,23 @@ import (
 	nri "github.com/k8snetworkplumbingwg/network-resources-injector/pkg/types"
 )
 
-type keyPairWatcher struct {
+type keyPairService struct {
 	status  *Channel
 	quit    *Channel
 	timeout time.Duration
 	keyPair nri.KeyReloader
 }
 
-//NewKeyPairWatcher will create a new cert & key file watcher
-func NewKeyPairWatcher(keyCert nri.KeyReloader, to time.Duration) nri.Service {
-	return &keyPairWatcher{nil, nil, to, keyCert}
+// NewKeyPair offers functionality to monitor cert and key - changes to cert and key will trigger update of HTTP server
+// cert and key.
+func NewKeyPair(keyCert nri.KeyReloader, to time.Duration) nri.Service {
+	return &keyPairService{nil, nil, to, keyCert}
 }
 
-//Run checks if key & cert exist and start go routine to monitor these files. Quit must be called after Run.
-func (kcw *keyPairWatcher) Run() error {
+// Run checks if key & cert exist and start to monitor these files. Quit must be called after Run.
+func (kcw *keyPairService) Run() error {
 	if kcw.status != nil && kcw.status.IsOpen() {
-		return errors.New("watcher must have exited before attempting to run again")
+		return errors.New("key pair watcher must have exited before attempting to run again")
 	}
 	kcw.status = NewChannel()
 	kcw.quit = NewChannel()
@@ -48,8 +49,8 @@ func (kcw *keyPairWatcher) Run() error {
 	return kcw.status.WaitUntilOpened(kcw.timeout)
 }
 
-//monitor key & cert files. Finish when quit signal received
-func (kcw *keyPairWatcher) monitor() (err error) {
+// monitor key & cert files. Finish when quit signal received
+func (kcw *keyPairService) monitor() (err error) {
 	defer func() {
 		if err != nil {
 			glog.Error(err)
@@ -111,15 +112,15 @@ func (kcw *keyPairWatcher) monitor() (err error) {
 	}
 }
 
-//Quit attempts to terminate key/cert watcher go routine and blocks until it ends. Quit call follows Run call. Error
-//only when timeout occurs while waiting for watcher to close
-func (kcw *keyPairWatcher) Quit() error {
+// Quit attempts to terminate key/cert watcher go routine and blocks until it ends. Quit call follows Run call. Error
+// only when timeout occurs while waiting for watcher to close
+func (kcw *keyPairService) Quit() error {
 	glog.Info("terminating TLS cert & key watcher")
 	kcw.quit.Close()
 	return kcw.status.WaitUntilClosed(kcw.timeout)
 }
 
-//StatusSignal returns channel that indicates when key/cert watcher has ended. Channel will be closed if watcher ends
-func (kcw *keyPairWatcher) StatusSignal() chan struct{} {
+// StatusSignal returns channel that indicates when key/cert watcher has ended. Channel will be closed if watcher ends
+func (kcw *keyPairService) StatusSignal() chan struct{} {
 	return kcw.status.GetCh()
 }

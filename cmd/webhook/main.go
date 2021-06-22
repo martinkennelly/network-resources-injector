@@ -24,12 +24,12 @@ import (
 )
 
 const (
-	userDefinedInjectionConfigMap = "nri-user-defined-injections"
-	defaultClientCa = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-	readTo          = 5 * time.Second
-	writeTo         = 10 * time.Second
-	readHeaderTo    = 1 * time.Second
-	serviceTo       = 2 * time.Second
+	defaultClientCa               = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+	readTo                        = 5 * time.Second
+	writeTo                       = 10 * time.Second
+	readHeaderTo                  = 1 * time.Second
+	serviceTo                     = 2 * time.Second
+	ciInterval                    = 30 * time.Second
 )
 
 func main() {
@@ -75,31 +75,37 @@ func main() {
 		glog.Fatalf("error loading client CA pool: '%s'", err.Error())
 	}
 
-	/* init API client */
-	clientset := webhook.SetupInClusterClient()
-
 	webhook.SetInjectHugepageDownApi(*injectHugepageDownApi)
 
 	webhook.SetHonorExistingResources(*resourcesHonorFlag)
 
-	err = webhook.SetResourceNameKeys(*resourceNameKeys)
-	if err != nil {
+	if err = webhook.SetResourceNameKeys(*resourceNameKeys); err != nil {
 		glog.Fatalf("error in setting resource name keys: %s", err.Error())
 	}
 
-	watcher := webhook.NewKeyPairWatcher(keyPair, serviceTo)
-	if err = watcher.Run(); err != nil {
-		glog.Fatalf("starting TLS key & cert file watcher failed: '%s'", err.Error())
+	if err = webhook.SetupInClusterClient(); err != nil {
+		glog.Fatalf("error trying to setup kubernetes client")
+	}
+
+	kp := webhook.NewKeyPair(keyPair, serviceTo)
+	if err = kp.Run(); err != nil {
+		glog.Fatalf("starting TLS key & cert file updater failed: '%s'", err.Error())
+	}
+
+	udi := webhook.GetUDI(namespace, ciInterval, serviceTo)
+	if err = udi.Run(); err != nil {
+		err = webhook.CombineError(err, kp.Quit())
+		glog.Fatalf("starting user defined injection updater failed: '%s'", err.Error())
 	}
 
 	server := webhook.NewMutateServer(*address, *port, *insecure, readTo, writeTo, readHeaderTo, serviceTo, clientCaPool, keyPair)
 	if err = server.Run(); err != nil {
-		watcher.Quit()
-		glog.Fatalf("starting HTTP server failed: '%s'", err)
+		err = webhook.CombineError(err, kp.Quit(), udi.Quit())
+		glog.Fatalf("starting HTTP server failed: '%s'", err.Error())
 	}
 
-	/* Blocks until termination or TLS key/cert file watcher or HTTP server signal occurs and stops HTTP server/file watcher */
-	if err := webhook.Watch(server, watcher, make(chan os.Signal, 1)); err != nil {
+	/* Blocks until termination or TLS key/cert file updater or UDI updater or HTTP server signal occurs */
+	if err := webhook.Watch(make(chan os.Signal, 1), kp, udi, server); err != nil {
 		glog.Error(err.Error())
 	}
 }

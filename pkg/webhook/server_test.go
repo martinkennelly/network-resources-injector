@@ -14,11 +14,11 @@ var _ = Describe("mutate HTTP server", func() {
 	Describe("Service interface implementation for HTTP server", func() {
 		const to = time.Millisecond * 50
 		var (
-			mutateSrv *mutateServer
+			mutateSrv *mutateServerService
 			srvMock   *nriMocks.Server
 		)
 		BeforeEach(func() {
-			mutateSrv = &mutateServer{&nriMocks.Server{}, to, NewChannel()}
+			mutateSrv = &mutateServerService{&nriMocks.Server{}, to, NewChannel()}
 			srvMock = &nriMocks.Server{}
 			mutateSrv.instance = srvMock
 		})

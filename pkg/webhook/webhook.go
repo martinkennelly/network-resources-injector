@@ -19,8 +19,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"k8s.io/client-go/rest"
 	"net/http"
-	"reflect"
 	"os"
 	"os/signal"
 	"regexp"
@@ -34,7 +34,6 @@ import (
 	nri "github.com/k8snetworkplumbingwg/network-resources-injector/pkg/types"
 	"github.com/pkg/errors"
 	multus "gopkg.in/intel/multus-cni.v3/pkg/types"
-
 	"k8s.io/api/admission/v1beta1"
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -43,7 +42,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 )
 
 type jsonPatchOperation struct {
@@ -74,7 +72,6 @@ var (
 	injectHugepageDownApi  bool
 	resourceNameKeys       []string
 	honorExistingResources bool
-	userDefinedInjects     = &userDefinedInjections{Patchs: make(map[string]jsonPatchOperation)}
 )
 
 func prepareAdmissionReviewResponse(allowed bool, message string, ar *v1beta1.AdmissionReview) error {
@@ -441,7 +438,7 @@ func addVolDownwardAPI(patch []jsonPatchOperation, hugepageResourceList []hugepa
 			FieldPath: "metadata.labels",
 		}
 		dAPILabels := corev1.DownwardAPIVolumeFile{
-			Path:     types.LabelsPath,
+			Path:     nri.LabelsPath,
 			FieldRef: &labels,
 		}
 		dAPIItems = append(dAPIItems, dAPILabels)
@@ -452,7 +449,7 @@ func addVolDownwardAPI(patch []jsonPatchOperation, hugepageResourceList []hugepa
 			FieldPath: "metadata.annotations",
 		}
 		dAPIAnnotations := corev1.DownwardAPIVolumeFile{
-			Path:     types.AnnotationsPath,
+			Path:     nri.AnnotationsPath,
 			FieldRef: &annotations,
 		}
 		dAPIItems = append(dAPIItems, dAPIAnnotations)
@@ -496,7 +493,7 @@ func addVolumeMount(patch []jsonPatchOperation, containersLen int) []jsonPatchOp
 	vm := corev1.VolumeMount{
 		Name:      "podnetinfo",
 		ReadOnly:  true,
-		MountPath: types.DownwardAPIMountPath,
+		MountPath: nri.DownwardAPIMountPath,
 	}
 	for containerIndex := 0; containerIndex < containersLen; containerIndex++ {
 		patch = append(patch, jsonPatchOperation{
@@ -679,10 +676,10 @@ func createCustomizedPatch(pod corev1.Pod) ([]jsonPatchOperation, error) {
 	var userDefinedPatch []jsonPatchOperation
 
 	// lock for reading
-	userDefinedInjects.Lock()
-	defer userDefinedInjects.Unlock()
+	udiSvc.udi.Lock()
+	defer udiSvc.udi.Unlock()
 
-	for k, v := range userDefinedInjects.Patchs {
+	for k, v := range udiSvc.udi.Patchs {
 		// The userDefinedInjects will be injected when:
 		// 1. Pod labels contain the patch key defined in userDefinedInjects, and
 		// 2. The value of patch key in pod labels(not in userDefinedInjects) is "true"
@@ -957,20 +954,6 @@ func SetResourceNameKeys(keys string) error {
 	return nil
 }
 
-// SetupInClusterClient setups K8s client to communicate with the API server
-func SetupInClusterClient() kubernetes.Interface {
-	/* setup Kubernetes API client */
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		glog.Fatal(err)
-	}
-	clientset, err = kubernetes.NewForConfig(config)
-	if err != nil {
-		glog.Fatal(err)
-	}
-	return clientset
-}
-
 // SetInjectHugepageDownApi sets a flag to indicate whether or not to inject the
 // hugepage request and limit for the Downward API.
 func SetInjectHugepageDownApi(hugepageFlag bool) {
@@ -982,62 +965,43 @@ func SetHonorExistingResources(resourcesHonorFlag bool) {
 	honorExistingResources = resourcesHonorFlag
 }
 
-// SetCustomizedInjections sets additional injections to be applied in Pod spec
-func SetCustomizedInjections(injections *corev1.ConfigMap) {
-	// lock for writing
-	userDefinedInjects.Lock()
-	defer userDefinedInjects.Unlock()
-
-	var patch jsonPatchOperation
-	var userDefinedPatchs = userDefinedInjects.Patchs
-
-	for k, v := range injections.Data {
-		existValue, exists := userDefinedPatchs[k]
-		// unmarshall userDefined injection to json patch
-		err := json.Unmarshal([]byte(v), &patch)
+// SetupInClusterClient sets package variable to enable communication to kubernetes API
+func SetupInClusterClient() error {
+	/* setup Kubernetes API client */
+	if clientset == nil {
+		config, err := rest.InClusterConfig()
 		if err != nil {
-			glog.Errorf("Failed to unmarshall user-defined injection: %v", v)
-			continue
+			return err
 		}
-		// metadata.Annotations is the only supported field for user definition
-		// jsonPatchOperation.Path should be "/metadata/annotations"
-		if patch.Path != "/metadata/annotations" {
-			glog.Errorf("Path: %v is not supported, only /metadata/annotations can be defined by user", patch.Path)
-			continue
-		}
-		if !exists || !reflect.DeepEqual(existValue, patch) {
-			glog.Infof("Initializing user-defined injections with key: %v, value: %v", k, v)
-			userDefinedPatchs[k] = patch
+		clientset, err = kubernetes.NewForConfig(config)
+		if err != nil {
+			return err
 		}
 	}
-	// remove stale entries from userDefined configMap
-	for k, _ := range userDefinedPatchs {
-		if _, ok := injections.Data[k]; ok {
-			continue
-		}
-		glog.Infof("Removing stale entry: %v from user-defined injections", k)
-		delete(userDefinedPatchs, k)
-	}
+	return nil
 }
 
-//Watch blocks until either TLS cert & key watcher or HTTP server or termination signal generated
-func Watch(server nri.Service, watcher nri.Service, term chan os.Signal) (err error) {
+// Watch blocks until either TLS cert & key updater or udi updater or HTTP server or termination signal generated
+func Watch(term chan os.Signal, kp, udi, server nri.Service) (err error) {
 	signal.Notify(term, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	select {
-	case <-watcher.StatusSignal(): // when TLS cert & key watcher finishes unexpectedly
-		glog.Error("TLS key & cert watcher ended")
-		err = server.Quit()
-	case <-server.StatusSignal(): // when HTTP server finishes unexpectedly
+	case <-kp.StatusSignal(): // when TLS cert & key updater finishes
+		glog.Error("TLS key & cert updater ended")
+		err = CombineError(server.Quit(), udi.Quit())
+	case <-udi.StatusSignal(): // when UDI updater finishes
+	    glog.Error("UDI updater ends")
+	    err = CombineError(server.Quit(), kp.Quit())
+	case <-server.StatusSignal(): // when HTTP server finishes
 		glog.Error("HTTP server ended")
-		err = watcher.Quit()
+		err = CombineError(kp.Quit(), udi.Quit())
 	case <-term: // when termination signal received
 		glog.Info("termination signal received")
-		err = combineError(server.Quit(), watcher.Quit())
+		err = CombineError(server.Quit(), kp.Quit(), udi.Quit())
 	}
 	return
 }
 
-//httpServerHandler limits HTTP server endpoint to /mutate and HTTP verb to POST only
+// httpServerHandler limits HTTP server endpoint to /mutate and HTTP verb to POST only
 func httpServerHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != mServerEndpoint {
 		http.NotFound(w, r)
@@ -1050,13 +1014,14 @@ func httpServerHandler(w http.ResponseWriter, r *http.Request) {
 	MutateHandler(w, r)
 }
 
-//combineError combines two errors into one error message
-func combineError(err1, err2 error) error {
-	if err1 != nil && err2 != nil {
-		return fmt.Errorf("two errors occured: 1) '%s' - 2) '%s'", err1.Error(), err2.Error())
+// CombineError combines errors into one error message
+func CombineError(errs ...error) (err error) {
+	for i := range errs {
+		if err == nil {
+			err = errs[i]
+		} else {
+			err = errors.Wrap(err, errs[i].Error())
+		}
 	}
-	if err1 != nil {
-		return err1
-	}
-	return err2
+	return
 }

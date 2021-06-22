@@ -16,16 +16,16 @@ const (
 	mServerEndpoint        = "/mutate"
 )
 
-type mutateServer struct {
+type mutateServerService struct {
 	instance nri.Server
 	timeout  time.Duration
 	status   *Channel
 }
 
-//NewMutateServer generate a new server to serve endpoint /mutate. Server will only serve /mutate endpoint and POST
-//HTTP verb. When arg insecure is false, it forces client certificate validation based on CAs in argument pool
-//otherwise no client certificate validation is required. Various timeout args exist to prevent DOS. Arg keypair contains
-//server TLS key/cert
+// NewMutateServer generate a new server to serve endpoint /mutate. Server will only serve /mutate endpoint and POST
+// HTTP verb. When arg insecure is false, it forces client certificate validation based on CAs in argument pool
+// otherwise no client certificate validation is required. Various timeout args exist to prevent DOS. Arg keypair contains
+// server TLS key/cert
 func NewMutateServer(address string, port int, insecure bool, readT, writeT, readHT, to time.Duration, pool nri.ClientCAPool,
 	keyPair nri.KeyReloader) nri.Service {
 	if insecure {
@@ -61,11 +61,11 @@ func NewMutateServer(address string, port int, insecure bool, readT, writeT, rea
 			GetCertificate: keyPair.GetCertificateFunc(),
 		},
 	}
-	return &mutateServer{&server{httpServer}, to, nil}
+	return &mutateServerService{&server{httpServer}, to, nil}
 }
 
-//Run starts HTTP server in goroutine, waits a period of time and returns any potential errors from server start
-func (mSrv *mutateServer) Run() error {
+// Run starts HTTP server in goroutine, waits a period of time and returns any potential errors from server start
+func (mSrv *mutateServerService) Run() error {
 	var httpSrvMsg error
 	glog.Info("starting HTTP server")
 	mSrv.status = NewChannel()
@@ -84,8 +84,8 @@ func (mSrv *mutateServer) Run() error {
 	return httpSrvMsg
 }
 
-//Quit attempts to shutdown HTTP server and waits for HTTP server status channel to close
-func (mSrv *mutateServer) Quit() error {
+// Quit attempts to shutdown HTTP server and waits for HTTP server status channel to close
+func (mSrv *mutateServerService) Quit() error {
 	glog.Info("terminating HTTP server")
 	if err := mSrv.instance.Stop(mSrv.timeout); err != nil && err != http.ErrServerClosed {
 		return err
@@ -93,8 +93,8 @@ func (mSrv *mutateServer) Quit() error {
 	return mSrv.status.WaitUntilClosed(mSrv.timeout)
 }
 
-//StatusSignal returns a channel which indicates whether mutate server has ended when channel closes
-func (mSrv *mutateServer) StatusSignal() chan struct{} {
+// StatusSignal returns a channel which indicates whether mutate server has ended when channel closes
+func (mSrv *mutateServerService) StatusSignal() chan struct{} {
 	return mSrv.status.GetCh()
 }
 
@@ -102,12 +102,12 @@ type server struct {
 	httpServer *http.Server
 }
 
-//Start wraps around package http ListenAndServeTLS and returns any error. Helps unit testing
+// Start wraps around package http ListenAndServeTLS and returns any error. Helps unit testing
 func (srv *server) Start() error {
 	return srv.httpServer.ListenAndServeTLS("", "")
 }
 
-//Stop wraps around package http Shutdown limited in time by timeout arg to and returns any error. Helps unit testing
+// Stop wraps around package http Shutdown limited in time by timeout arg to and returns any error. Helps unit testing
 func (srv *server) Stop(to time.Duration) error {
 	srv.httpServer.SetKeepAlivesEnabled(false)
 	serverCtx, cancel := context.WithTimeout(context.Background(), to)
