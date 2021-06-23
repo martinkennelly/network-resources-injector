@@ -1,4 +1,4 @@
-package webhook
+package channel
 
 import (
 	"errors"
@@ -14,14 +14,15 @@ const (
 
 //Channel contains fields to safely manage a channel
 type Channel struct {
-	ch     chan struct{}
-	isOpen bool
-	mutex  sync.Mutex
+	ch         chan struct{}
+	isOpen     bool
+	bufferSize int
+	mutex      sync.Mutex
 }
 
 //NewChannel returns an instance of type Channel
-func NewChannel() *Channel {
-	return &Channel{}
+func NewChannel(bufferSize int) *Channel {
+	return &Channel{bufferSize: bufferSize}
 }
 
 //Close checks if channel closed before trying to close

@@ -4,30 +4,33 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/service"
+	tls2 "github.com/k8snetworkplumbingwg/network-resources-injector/pkg/tls"
 	"net/http"
 	"time"
 
 	"github.com/golang/glog"
-	nri "github.com/k8snetworkplumbingwg/network-resources-injector/pkg/types"
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/channel"
 )
 
 const (
 	mServerStartupInterval = time.Millisecond * 50
 	mServerEndpoint        = "/mutate"
+	chBufferSize           = 1
 )
 
 type mutateServerService struct {
-	instance nri.Server
+	instance Server
 	timeout  time.Duration
-	status   *Channel
+	status   *channel.Channel
 }
 
 // NewMutateServer generate a new server to serve endpoint /mutate. Server will only serve /mutate endpoint and POST
 // HTTP verb. When arg insecure is false, it forces client certificate validation based on CAs in argument pool
 // otherwise no client certificate validation is required. Various timeout args exist to prevent DOS. Arg keypair contains
 // server TLS key/cert
-func NewMutateServer(address string, port int, insecure bool, readT, writeT, readHT, to time.Duration, pool nri.ClientCAPool,
-	keyPair nri.KeyReloader) nri.Service {
+func NewMutateServer(address string, port int, insecure bool, readT, writeT, readHT, to time.Duration, pool tls2.ClientCAPool,
+	keyPair tls2.KeyReloader) service.Service {
 	if insecure {
 		glog.Warning("HTTP server is configured not to require client certificate")
 	}
@@ -44,7 +47,7 @@ func NewMutateServer(address string, port int, insecure bool, readT, writeT, rea
 		MaxHeaderBytes:    1 << 20,
 		ReadHeaderTimeout: readHT,
 		TLSConfig: &tls.Config{
-			ClientAuth:               GetClientAuth(insecure),
+			ClientAuth:               tls2.GetClientAuth(insecure),
 			MinVersion:               tls.VersionTLS12,
 			CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384},
 			ClientCAs:                pool.GetCertPool(),
@@ -68,7 +71,7 @@ func NewMutateServer(address string, port int, insecure bool, readT, writeT, rea
 func (mSrv *mutateServerService) Run() error {
 	var httpSrvMsg error
 	glog.Info("starting HTTP server")
-	mSrv.status = NewChannel()
+	mSrv.status = channel.NewChannel(chBufferSize)
 
 	go func() {
 		mSrv.status.Open()
@@ -96,6 +99,12 @@ func (mSrv *mutateServerService) Quit() error {
 // StatusSignal returns a channel which indicates whether mutate server has ended when channel closes
 func (mSrv *mutateServerService) StatusSignal() chan struct{} {
 	return mSrv.status.GetCh()
+}
+
+// start and stop HTTP server - helps unit tests mocking of HTTP server
+type Server interface {
+	Start() error
+	Stop(timeout time.Duration) error
 }
 
 type server struct {

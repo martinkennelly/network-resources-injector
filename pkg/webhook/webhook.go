@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/service"
 	"io/ioutil"
 	"k8s.io/client-go/rest"
 	"net/http"
@@ -982,7 +983,7 @@ func SetupInClusterClient() error {
 }
 
 // Watch blocks until either TLS cert & key updater or udi updater or HTTP server or termination signal generated
-func Watch(term chan os.Signal, kp, udi, server nri.Service) (err error) {
+func Watch(term chan os.Signal, kp, udi, server service.Service) (err error) {
 	signal.Notify(term, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	select {
 	case <-kp.StatusSignal(): // when TLS cert & key updater finishes

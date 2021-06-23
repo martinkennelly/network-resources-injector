@@ -3,24 +3,26 @@ package webhook
 import (
 	"errors"
 	"fmt"
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/channel"
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/service"
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/tls"
 	"os"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/golang/glog"
-	nri "github.com/k8snetworkplumbingwg/network-resources-injector/pkg/types"
 )
 
 type keyPairService struct {
-	status  *Channel
-	quit    *Channel
+	status  *channel.Channel
+	quit    *channel.Channel
 	timeout time.Duration
-	keyPair nri.KeyReloader
+	keyPair tls.KeyReloader
 }
 
 // NewKeyPair offers functionality to monitor cert and key - changes to cert and key will trigger update of HTTP server
 // cert and key.
-func NewKeyPair(keyCert nri.KeyReloader, to time.Duration) nri.Service {
+func NewKeyPair(keyCert tls.KeyReloader, to time.Duration) service.Service {
 	return &keyPairService{nil, nil, to, keyCert}
 }
 
@@ -29,8 +31,8 @@ func (kcw *keyPairService) Run() error {
 	if kcw.status != nil && kcw.status.IsOpen() {
 		return errors.New("key pair watcher must have exited before attempting to run again")
 	}
-	kcw.status = NewChannel()
-	kcw.quit = NewChannel()
+	kcw.status = channel.NewChannel()
+	kcw.quit = channel.NewChannel()
 	cert := kcw.keyPair.GetCertPath()
 	key := kcw.keyPair.GetKeyPath()
 

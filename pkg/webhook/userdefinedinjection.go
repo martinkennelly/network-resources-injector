@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/channel"
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/service"
 	"reflect"
 	"time"
 
 	"github.com/golang/glog"
-	nri "github.com/k8snetworkplumbingwg/network-resources-injector/pkg/types"
 	corev1 "k8s.io/api/core/v1"
 	apiMError "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,8 +18,8 @@ import (
 const userDefinedInjectionConfigMap = "nri-user-defined-injections"
 
 type udiService struct {
-	status  *Channel
-	quit    *Channel
+	status  *channel.Channel
+	quit    *channel.Channel
 	timeout time.Duration
 	interval time.Duration
 	namespace string
@@ -29,7 +30,7 @@ type udiService struct {
 var udiSvc *udiService
 
 // GetUDI provides functionality to store user defined injections and updating this store periodically
-func GetUDI(namespace string, interval, timeout time.Duration) nri.Service {
+func GetUDI(namespace string, interval, timeout time.Duration) service.Service {
 	if udiSvc == nil {
 		udiSvc = &udiService{udi: &userDefinedInjections{Patchs: make(map[string]jsonPatchOperation)}, namespace: namespace,
 			interval: interval, timeout: timeout}
@@ -42,8 +43,8 @@ func (udi *udiService) Run() error {
 	if udi.status != nil && udi.status.IsOpen() {
 		return errors.New("customized injection service must have exited before attempting to run again")
 	}
-	udi.status = NewChannel()
-	udi.quit = NewChannel()
+	udi.status = channel.NewChannel()
+	udi.quit = channel.NewChannel()
 
 	go udi.monitorConfigMap()
 

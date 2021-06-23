@@ -16,6 +16,7 @@ package main
 
 import (
 	"flag"
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/tls"
 	"os"
 	"time"
 
@@ -34,7 +35,7 @@ const (
 
 func main() {
 	var namespace string
-	var clientCAPaths webhook.ClientCAFlags
+	var clientCAPaths tls.ClientCAFlags
 	/* load configuration */
 	port := flag.Int("port", 8443, "The port on which to serve.")
 	address := flag.String("bind-address", "0.0.0.0", "The IP address on which to listen for the --port port.")
@@ -65,12 +66,12 @@ func main() {
 
 	glog.Infof("starting mutating admission controller for network resources injection")
 
-	keyPair, err := webhook.NewTlsKeyPairReloader(*cert, *key)
+	keyPair, err := tls.NewTlsKeyPairReloader(*cert, *key)
 	if err != nil {
 		glog.Fatalf("error load certificate: %s", err.Error())
 	}
 
-	clientCaPool, err := webhook.NewClientCertPool(&clientCAPaths, *insecure)
+	clientCaPool, err := tls.NewClientCertPool(&clientCAPaths, *insecure)
 	if err != nil {
 		glog.Fatalf("error loading client CA pool: '%s'", err.Error())
 	}

@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"errors"
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/channel"
 	"time"
 
 	nriMocks "github.com/k8snetworkplumbingwg/network-resources-injector/pkg/types/mocks"
@@ -18,7 +19,7 @@ var _ = Describe("mutate HTTP server", func() {
 			srvMock   *nriMocks.Server
 		)
 		BeforeEach(func() {
-			mutateSrv = &mutateServerService{&nriMocks.Server{}, to, NewChannel()}
+			mutateSrv = &mutateServerService{&nriMocks.Server{}, to, channel.NewChannel()}
 			srvMock = &nriMocks.Server{}
 			mutateSrv.instance = srvMock
 		})
