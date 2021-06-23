@@ -29,7 +29,7 @@ import (
 	"github.com/golang/glog"
 	cniv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	"github.com/pkg/errors"
-	multus "gopkg.in/intel/multus-cni.v3/types"
+	multus "gopkg.in/intel/multus-cni.v3/pkg/types"
 
 	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/types"
 	"k8s.io/api/admission/v1beta1"
@@ -154,6 +154,13 @@ func deserializePod(ar *v1beta1.AdmissionReview) (corev1.Pod, error) {
 	if pod.ObjectMeta.Namespace != "" {
 		return pod, err
 	}
+
+	// AdmissionRequest contains an optional Namespace field
+	if ar.Request.Namespace != "" {
+		pod.ObjectMeta.Namespace = ar.Request.Namespace
+		return pod, nil
+	}
+
 	ownerRef := pod.ObjectMeta.OwnerReferences
 	if ownerRef != nil && len(ownerRef) > 0 {
 		namespace, err := getNamespaceFromOwnerReference(pod.ObjectMeta.OwnerReferences[0])
@@ -162,6 +169,10 @@ func deserializePod(ar *v1beta1.AdmissionReview) (corev1.Pod, error) {
 		}
 		pod.ObjectMeta.Namespace = namespace
 	}
+
+	// pod.ObjectMeta.Namespace may still be empty at this point,
+	// but there is a chance that net-attach-def annotation contains
+	// a valid namespace
 	return pod, err
 }
 
@@ -270,7 +281,18 @@ func parsePodNetworkSelections(podNetworks, defaultNamespace string) ([]*multus.
 	/* fill missing namespaces with default value */
 	for _, networkSelection := range networkSelections {
 		if networkSelection.Namespace == "" {
-			networkSelection.Namespace = defaultNamespace
+			if defaultNamespace == "" {
+				// Ignore the AdmissionReview request when the following conditions are met:
+				// 1) net-attach-def annotation doesn't contain a valid namespace
+				// 2) defaultNamespace retrieved from admission request is empty
+				// Pod admission would fail in subsquent call "getNetworkAttachmentDefinition"
+				// if no namespace is specified. We don't want to fail the pod creation
+				// in such case since it is possible that pod is not a SR-IOV pod
+				glog.Warningf("The admission request doesn't contain a valid namespace, ignoring...")
+				return nil, nil
+			} else {
+				networkSelection.Namespace = defaultNamespace
+			}
 		}
 	}
 
@@ -574,6 +596,17 @@ func createResourcePatch(patch []jsonPatchOperation, Containers []corev1.Contain
 		patch = patchEmptyResources(patch, 0, "limits")
 	}
 
+	for resourceName := range resourceRequests {
+		for _, container := range Containers {
+			if _, exists := container.Resources.Limits[corev1.ResourceName(resourceName)]; exists {
+				delete(resourceRequests, resourceName)
+			}
+			if _, exists := container.Resources.Requests[corev1.ResourceName(resourceName)]; exists {
+				delete(resourceRequests, resourceName)
+			}
+		}
+	}
+
 	resourceList := *getResourceList(resourceRequests)
 
 	for resource, quantity := range resourceList {
@@ -639,22 +672,6 @@ func getResourceList(resourceRequests map[string]int64) *corev1.ResourceList {
 	return &resourceList
 }
 
-func appendPodAnnotation(patch []jsonPatchOperation, pod corev1.Pod, userDefinedPatch jsonPatchOperation) []jsonPatchOperation {
-	annotMap := make(map[string]string)
-	for k, v := range pod.ObjectMeta.Annotations {
-		annotMap[k] = v
-	}
-	for k, v := range userDefinedPatch.Value.(map[string]interface{}) {
-		annotMap[k] = v.(string)
-	}
-	patch = append(patch, jsonPatchOperation{
-		Operation: "add",
-		Path:      "/metadata/annotations",
-		Value:     annotMap,
-	})
-	return patch
-}
-
 func createCustomizedPatch(pod corev1.Pod) ([]jsonPatchOperation, error) {
 	var userDefinedPatch []jsonPatchOperation
 
@@ -673,13 +690,43 @@ func createCustomizedPatch(pod corev1.Pod) ([]jsonPatchOperation, error) {
 	return userDefinedPatch, nil
 }
 
-func appendCustomizedPatch(patch []jsonPatchOperation, pod corev1.Pod, userDefinedPatch []jsonPatchOperation) []jsonPatchOperation {
+func appendAddAnnotPatch(patch []jsonPatchOperation, pod corev1.Pod, userDefinedPatch []jsonPatchOperation) []jsonPatchOperation {
+	annotations := make(map[string]string)
+	patchOp := jsonPatchOperation{
+		Operation: "add",
+		Path:      "/metadata/annotations",
+		Value:     annotations,
+	}
+
 	for _, p := range userDefinedPatch {
-		if p.Path == "/metadata/annotations" {
-			patch = appendPodAnnotation(patch, pod, p)
+		if p.Path == "/metadata/annotations" && p.Operation == "add" {
+			//loop over user defined injected annotations key-value pairs
+			for k, v := range p.Value.(map[string]interface{}) {
+				if _, exists := annotations[k]; exists {
+					glog.Warningf("ignoring duplicate user defined injected annotation: %s: %s", k, v.(string))
+				} else {
+					annotations[k] = v.(string)
+				}
+			}
 		}
 	}
+
+	if len(annotations) > 0 {
+		// attempt to add existing pod annotation but do not override
+		for k, v := range pod.ObjectMeta.Annotations {
+			if _, exists := annotations[k]; !exists {
+				annotations[k] = v
+			}
+		}
+		patch = append(patch, patchOp)
+	}
+
 	return patch
+}
+
+func appendCustomizedPatch(patch []jsonPatchOperation, pod corev1.Pod, userDefinedPatch []jsonPatchOperation) []jsonPatchOperation {
+	//Add operation for annotations is currently only supported
+	return appendAddAnnotPatch(patch, pod, userDefinedPatch)
 }
 
 func getNetworkSelections(annotationKey string, pod corev1.Pod, userDefinedPatch []jsonPatchOperation) (string, bool) {
@@ -728,10 +775,12 @@ func MutateHandler(w http.ResponseWriter, req *http.Request) {
 		handleValidationError(w, ar, err)
 		return
 	}
+	glog.Infof("AdmissionReview request received for pod %s/%s", pod.ObjectMeta.Namespace, pod.ObjectMeta.Name)
 
 	userDefinedPatch, err := createCustomizedPatch(pod)
 	if err != nil {
-		glog.Warningf("Error, failed to create user-defined injection patch, %v", err)
+		glog.Warningf("failed to create user-defined injection patch for pod %s/%s, err: %v",
+			pod.ObjectMeta.Namespace, pod.ObjectMeta.Name, err)
 	}
 
 	defaultNetSelection, defExist := getNetworkSelections(defaultNetworkAnnotationKey, pod, userDefinedPatch)
@@ -755,7 +804,8 @@ func MutateHandler(w http.ResponseWriter, req *http.Request) {
 				if err != nil {
 					err = prepareAdmissionReviewResponse(false, err.Error(), ar)
 					if err != nil {
-						glog.Errorf("error preparing AdmissionReview response: %s", err)
+						glog.Errorf("error preparing AdmissionReview response for pod %s/%s, error: %v",
+							pod.ObjectMeta.Namespace, pod.ObjectMeta.Name, err)
 						http.Error(w, err.Error(), http.StatusBadRequest)
 						return
 					}
@@ -776,7 +826,8 @@ func MutateHandler(w http.ResponseWriter, req *http.Request) {
 				if err != nil {
 					err = prepareAdmissionReviewResponse(false, err.Error(), ar)
 					if err != nil {
-						glog.Errorf("error preparing AdmissionReview response: %s", err)
+						glog.Errorf("error preparing AdmissionReview response for pod %s/%s, error: %v",
+							pod.ObjectMeta.Namespace, pod.ObjectMeta.Name, err)
 						http.Error(w, err.Error(), http.StatusBadRequest)
 						return
 					}
@@ -784,18 +835,21 @@ func MutateHandler(w http.ResponseWriter, req *http.Request) {
 					return
 				}
 			}
+			glog.Infof("pod %s/%s has resource requests: %v and node selectors: %v", pod.ObjectMeta.Namespace,
+				pod.ObjectMeta.Name, resourceRequests, desiredNsMap)
 		}
 
 		/* patch with custom resources requests and limits */
 		err = prepareAdmissionReviewResponse(true, "allowed", ar)
 		if err != nil {
-			glog.Errorf("error preparing AdmissionReview response: %s", err)
+			glog.Errorf("error preparing AdmissionReview response for pod %s/%s, error: %v",
+				pod.ObjectMeta.Namespace, pod.ObjectMeta.Name, err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		var patch []jsonPatchOperation
 		if len(resourceRequests) == 0 {
-			glog.Infof("pod doesn't need any custom network resources")
+			glog.Infof("pod %s/%s doesn't need any custom network resources", pod.ObjectMeta.Namespace, pod.ObjectMeta.Name)
 		} else {
 			glog.Infof("honor-resources=%v", honorExistingResources)
 			if honorExistingResources {
@@ -865,7 +919,7 @@ func MutateHandler(w http.ResponseWriter, req *http.Request) {
 			patch = appendCustomizedPatch(patch, pod, userDefinedPatch)
 		}
 		patch = createNodeSelectorPatch(patch, pod.Spec.NodeSelector, desiredNsMap)
-		glog.Infof("patch after all mutations: %v", patch)
+		glog.Infof("patch after all mutations: %v for pod %s/%s", patch, pod.ObjectMeta.Namespace, pod.ObjectMeta.Name)
 
 		patchBytes, _ := json.Marshal(patch)
 		ar.Response.Patch = patchBytes
@@ -875,18 +929,17 @@ func MutateHandler(w http.ResponseWriter, req *http.Request) {
 		}()
 	} else {
 		/* network annotation not provided or empty */
-		glog.Infof("pod spec doesn't have network annotations. Skipping...")
+		glog.Infof("pod %s/%s spec doesn't have network annotations. Skipping...", pod.ObjectMeta.Namespace, pod.ObjectMeta.Name)
 		err = prepareAdmissionReviewResponse(true, "Pod spec doesn't have network annotations. Skipping...", ar)
 		if err != nil {
-			glog.Infof("error preparing AdmissionReview response: %s", err)
+			glog.Errorf("error preparing AdmissionReview response for pod %s/%s, error: %v",
+				pod.ObjectMeta.Namespace, pod.ObjectMeta.Name, err)
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 	}
 
 	writeResponse(w, ar)
-	return
-
 }
 
 // SetResourceNameKeys extracts resources from a string and add them to resourceNameKeys array
