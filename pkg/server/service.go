@@ -1,36 +1,37 @@
-package webhook
+package server
 
 import (
-	"context"
 	"crypto/tls"
 	"fmt"
+	"github.com/golang/glog"
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/ca"
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/channel"
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/keycert"
 	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/service"
-	tls2 "github.com/k8snetworkplumbingwg/network-resources-injector/pkg/tls"
 	"net/http"
 	"time"
-
-	"github.com/golang/glog"
-	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/channel"
 )
 
 const (
-	mServerStartupInterval = time.Millisecond * 50
-	mServerEndpoint        = "/mutate"
-	chBufferSize           = 1
+	startupInterval = time.Millisecond * 50
+	endpoint        = "/mutate"
+	chBufferSize    = 1
+	serviceName     = "network resources injector /mutate server"
 )
 
-type mutateServerService struct {
+type mutateServer struct {
 	instance Server
 	timeout  time.Duration
 	status   *channel.Channel
+	name string
 }
 
 // NewMutateServer generate a new server to serve endpoint /mutate. Server will only serve /mutate endpoint and POST
 // HTTP verb. When arg insecure is false, it forces client certificate validation based on CAs in argument pool
 // otherwise no client certificate validation is required. Various timeout args exist to prevent DOS. Arg keypair contains
 // server TLS key/cert
-func NewMutateServer(address string, port int, insecure bool, readT, writeT, readHT, to time.Duration, pool tls2.ClientCAPool,
-	keyPair tls2.KeyReloader) service.Service {
+func NewMutateServer(address string, port int, insecure bool, readT, writeT, readHT, to time.Duration, pool ca.ClientCAPool,
+	keyCert keycert.Identity) service.Service {
 	if insecure {
 		glog.Warning("HTTP server is configured not to require client certificate")
 	}
@@ -47,7 +48,7 @@ func NewMutateServer(address string, port int, insecure bool, readT, writeT, rea
 		MaxHeaderBytes:    1 << 20,
 		ReadHeaderTimeout: readHT,
 		TLSConfig: &tls.Config{
-			ClientAuth:               tls2.GetClientAuth(insecure),
+			ClientAuth:               GetClientAuth(insecure),
 			MinVersion:               tls.VersionTLS12,
 			CurvePreferences:         []tls.CurveID{tls.CurveP521, tls.CurveP384},
 			ClientCAs:                pool.GetCertPool(),
@@ -61,14 +62,14 @@ func NewMutateServer(address string, port int, insecure bool, readT, writeT, rea
 				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
 				// tls 1.3 configuration not supported
 			},
-			GetCertificate: keyPair.GetCertificateFunc(),
+			GetCertificate: keyCert.GetCertificateFunc(),
 		},
 	}
-	return &mutateServerService{&server{httpServer}, to, nil}
+	return &mutateServer{&server{httpServer}, to, nil, serviceName}
 }
 
 // Run starts HTTP server in goroutine, waits a period of time and returns any potential errors from server start
-func (mSrv *mutateServerService) Run() error {
+func (mSrv *mutateServer) Run() error {
 	var httpSrvMsg error
 	glog.Info("starting HTTP server")
 	mSrv.status = channel.NewChannel(chBufferSize)
@@ -82,13 +83,13 @@ func (mSrv *mutateServerService) Run() error {
 		}
 		glog.Info("HTTP server finished")
 	}()
-	//give server time to start and return error if startup failed
-	time.Sleep(mServerStartupInterval)
+	// give server time to start and return error if startup failed
+	time.Sleep(startupInterval)
 	return httpSrvMsg
 }
 
 // Quit attempts to shutdown HTTP server and waits for HTTP server status channel to close
-func (mSrv *mutateServerService) Quit() error {
+func (mSrv *mutateServer) Quit() error {
 	glog.Info("terminating HTTP server")
 	if err := mSrv.instance.Stop(mSrv.timeout); err != nil && err != http.ErrServerClosed {
 		return err
@@ -97,29 +98,12 @@ func (mSrv *mutateServerService) Quit() error {
 }
 
 // StatusSignal returns a channel which indicates whether mutate server has ended when channel closes
-func (mSrv *mutateServerService) StatusSignal() chan struct{} {
+func (mSrv *mutateServer) StatusSignal() chan struct{} {
 	return mSrv.status.GetCh()
 }
 
-// start and stop HTTP server - helps unit tests mocking of HTTP server
-type Server interface {
-	Start() error
-	Stop(timeout time.Duration) error
+// GetName returns service name
+func (mSrv *mutateServer) GetName() string {
+	return mSrv.name
 }
 
-type server struct {
-	httpServer *http.Server
-}
-
-// Start wraps around package http ListenAndServeTLS and returns any error. Helps unit testing
-func (srv *server) Start() error {
-	return srv.httpServer.ListenAndServeTLS("", "")
-}
-
-// Stop wraps around package http Shutdown limited in time by timeout arg to and returns any error. Helps unit testing
-func (srv *server) Stop(to time.Duration) error {
-	srv.httpServer.SetKeepAlivesEnabled(false)
-	serverCtx, cancel := context.WithTimeout(context.Background(), to)
-	defer cancel()
-	return srv.httpServer.Shutdown(serverCtx)
-}

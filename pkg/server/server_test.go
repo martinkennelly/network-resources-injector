@@ -1,4 +1,4 @@
-package webhook
+package server
 
 import (
 	"errors"
@@ -15,11 +15,12 @@ var _ = Describe("mutate HTTP server", func() {
 	Describe("Service interface implementation for HTTP server", func() {
 		const to = time.Millisecond * 50
 		var (
-			mutateSrv *mutateServerService
+			mutateSrv *mutateServer
 			srvMock   *nriMocks.Server
 		)
 		BeforeEach(func() {
-			mutateSrv = &mutateServerService{&nriMocks.Server{}, to, channel.NewChannel()}
+			mutateSrv = &mutateServer{&nriMocks.Server{}, to, channel.NewChannel(chBufferSize),
+				serviceName}
 			srvMock = &nriMocks.Server{}
 			mutateSrv.instance = srvMock
 		})

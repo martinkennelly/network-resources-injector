@@ -10,7 +10,7 @@ import (
 var _ = Describe("Status", func() {
 	var ch *Channel
 	BeforeEach(func() {
-		ch = NewChannel()
+		ch = NewChannel(chBuffer)
 	})
 	Context("NewChannel()", func() {
 		It("should be down by default", func() {

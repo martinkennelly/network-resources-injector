@@ -1,10 +1,11 @@
-package tls
+package ca
 
 import (
 	"crypto/x509"
 	"fmt"
-	"github.com/golang/glog"
 	"io/ioutil"
+
+	"github.com/golang/glog"
 )
 
 type ClientCAPool interface {
@@ -14,12 +15,12 @@ type ClientCAPool interface {
 
 type clientCertPool struct {
 	certPool  *x509.CertPool
-	certPaths *ClientCAFlags
+	certPaths ClientCAFlags
 	insecure  bool
 }
 
-//NewClientCertPool will load a single client CA
-func NewClientCertPool(clientCaPaths *ClientCAFlags, insecure bool) (ClientCAPool, error) {
+// NewClientCertPool will load a single client CA
+func NewClientCertPool(clientCaPaths ClientCAFlags, insecure bool) (ClientCAPool, error) {
 	pool := &clientCertPool{
 		certPaths: clientCaPaths,
 		insecure:  insecure,
@@ -32,19 +33,19 @@ func NewClientCertPool(clientCaPaths *ClientCAFlags, insecure bool) (ClientCAPoo
 	return pool, nil
 }
 
-//Load a certificate into the client CA pool
+// Load a certificate into the client CA pool
 func (pool *clientCertPool) Load() error {
 	if pool.insecure {
 		glog.Infof("can not load client CA pool. Remove --insecure flag to enable.")
 		return nil
 	}
 
-	if len(*pool.certPaths) == 0 {
+	if len(pool.certPaths) == 0 {
 		return fmt.Errorf("no client CA file path(s) found")
 	}
 
 	pool.certPool = x509.NewCertPool()
-	for _, path := range *pool.certPaths {
+	for _, path := range pool.certPaths {
 		caCertPem, err := ioutil.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("failed to load client CA file from path '%s'", path)
@@ -54,11 +55,11 @@ func (pool *clientCertPool) Load() error {
 		}
 		glog.Infof("added client CA to cert pool from path '%s'", path)
 	}
-	glog.Infof("added '%d' client CA(s) to cert pool", len(*pool.certPaths))
+	glog.Infof("added '%d' client CA(s) to cert pool", len(pool.certPaths))
 	return nil
 }
 
-//GetCertPool returns a client CA pool
+// GetCertPool returns a client CA pool
 func (pool *clientCertPool) GetCertPool() *x509.CertPool {
 	if pool.insecure {
 		return nil

@@ -1,4 +1,4 @@
-package webhook
+package keycert
 
 import (
 	"errors"
@@ -22,7 +22,7 @@ var _ = Describe("cert & key watcher", func() {
 	)
 	var (
 		keyPair *nriMocks.KeyReloader
-		kcw     *keyPair
+		kcw     *keyCertUpdate
 		certF   *os.File
 		keyF    *os.File
 	)
@@ -30,7 +30,7 @@ var _ = Describe("cert & key watcher", func() {
 		keyPair = &nriMocks.KeyReloader{}
 		certF, _ = ioutil.TempFile(TempDir, certFName)
 		keyF, _ = ioutil.TempFile(TempDir, keyFName)
-		kcw = &keyPair{nil, nil, to, keyPair}
+		kcw = &keyCertUpdate{nil, nil, to, keyPair}
 		keyPair.On("GetCertPath").Return(certF.Name())
 		keyPair.On("GetKeyPath").Return(keyF.Name())
 	})
@@ -43,7 +43,7 @@ var _ = Describe("cert & key watcher", func() {
 
 	Context("Run()", func() {
 		It("should retrieve cert and key path", func() {
-			keyPair.On("Reload").Return(nil)
+			keyPair.On("Identity").Return(nil)
 			kcw.Run()
 			keyPair.AssertCalled(t, "GetCertPath")
 			keyPair.AssertCalled(t, "GetKeyPath")
@@ -59,29 +59,29 @@ var _ = Describe("cert & key watcher", func() {
 		It("should not reload cert/key if only key is altered", func() {
 			kcw.Run()
 			os.Chtimes(certF.Name(), time.Now(), time.Now()) // touch file
-			time.Sleep(interval)                             // wait for Reload function to be possibly called
-			keyPair.AssertNotCalled(t, "Reload")
+			time.Sleep(interval)                             // wait for Identity function to be possibly called
+			keyPair.AssertNotCalled(t, "Identity")
 		})
 		It("should not reload cert/key if only cert is altered", func() {
 			kcw.Run()
 			os.Chtimes(keyF.Name(), time.Now(), time.Now()) // touch file
-			time.Sleep(interval)                            // wait for Reload function to be possibly called
-			keyPair.AssertNotCalled(t, "Reload")
+			time.Sleep(interval)                            // wait for Identity function to be possibly called
+			keyPair.AssertNotCalled(t, "Identity")
 		})
 		It("should reload cert/key if cert and key are altered", func() {
-			keyPair.On("Reload").Return(nil)
+			keyPair.On("Identity").Return(nil)
 			kcw.Run()
 			os.Chtimes(certF.Name(), time.Now(), time.Now()) // touch file
 			os.Chtimes(keyF.Name(), time.Now(), time.Now())
-			time.Sleep(interval) // wait for Reload function to be called
+			time.Sleep(interval) // wait for Identity function to be called
 			keyPair.AssertExpectations(t)
 		})
 		It("should terminate watcher when reload fails", func() {
-			keyPair.On("Reload").Return(errors.New("failed to reload keys"))
+			keyPair.On("Identity").Return(errors.New("failed to reload keys"))
 			kcw.Run()
 			os.Chtimes(certF.Name(), time.Now(), time.Now()) // touch file
 			os.Chtimes(keyF.Name(), time.Now(), time.Now())
-			time.Sleep(interval) // wait for Reload function to be called
+			time.Sleep(interval) // wait for Identity function to be called
 			Expect(kcw.status.IsOpen()).To(BeFalse())
 		})
 		It("should tolerate restart", func() {

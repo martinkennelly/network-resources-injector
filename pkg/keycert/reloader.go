@@ -1,4 +1,4 @@
-package tls
+package keycert
 
 import (
 	"crypto/tls"
@@ -7,23 +7,23 @@ import (
 	"github.com/golang/glog"
 )
 
-type KeyReloader interface {
+type Identity interface {
 	Reload() error
 	GetCertificateFunc() func(*tls.ClientHelloInfo) (*tls.Certificate, error)
 	GetKeyPath() string
 	GetCertPath() string
 }
 
-type tlsKeypairReloader struct {
+type keyCert struct {
 	certMutex sync.RWMutex
 	cert      *tls.Certificate
 	certPath  string
 	keyPath   string
 }
 
-//NewTlsKeyPairReloader loads a cert and key
-func NewTlsKeyPairReloader(certPath, keyPath string) (KeyReloader, error) {
-	result := &tlsKeypairReloader{
+// NewIdentity loads a cert and key
+func NewIdentity(certPath, keyPath string) (Identity, error) {
+	result := &keyCert{
 		certPath: certPath,
 		keyPath:  keyPath,
 	}
@@ -36,7 +36,7 @@ func NewTlsKeyPairReloader(certPath, keyPath string) (KeyReloader, error) {
 	return result, nil
 }
 
-func (keyPair *tlsKeypairReloader) Reload() error {
+func (keyPair *keyCert) Reload() error {
 	newCert, err := tls.LoadX509KeyPair(keyPair.certPath, keyPair.keyPath)
 	if err != nil {
 		return err
@@ -48,7 +48,7 @@ func (keyPair *tlsKeypairReloader) Reload() error {
 	return nil
 }
 
-func (keyPair *tlsKeypairReloader) GetCertificateFunc() func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+func (keyPair *keyCert) GetCertificateFunc() func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
 	return func(clientHello *tls.ClientHelloInfo) (*tls.Certificate, error) {
 		keyPair.certMutex.RLock()
 		defer keyPair.certMutex.RUnlock()
@@ -56,10 +56,10 @@ func (keyPair *tlsKeypairReloader) GetCertificateFunc() func(*tls.ClientHelloInf
 	}
 }
 
-func (keyPair *tlsKeypairReloader) GetKeyPath() string {
+func (keyPair *keyCert) GetKeyPath() string {
 	return keyPair.keyPath
 }
 
-func (keyPair *tlsKeypairReloader) GetCertPath() string {
+func (keyPair *keyCert) GetCertPath() string {
 	return keyPair.certPath
 }

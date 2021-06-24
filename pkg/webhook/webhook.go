@@ -18,23 +18,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/service"
-	"io/ioutil"
-	"k8s.io/client-go/rest"
-	"net/http"
-	"os"
-	"os/signal"
-	"regexp"
-	"strconv"
-	"strings"
-	"sync"
-	"syscall"
-
 	"github.com/golang/glog"
 	cniv1 "github.com/k8snetworkplumbingwg/network-attachment-definition-client/pkg/apis/k8s.cni.cncf.io/v1"
 	nri "github.com/k8snetworkplumbingwg/network-resources-injector/pkg/types"
 	"github.com/pkg/errors"
 	multus "gopkg.in/intel/multus-cni.v3/pkg/types"
+	"io/ioutil"
 	"k8s.io/api/admission/v1beta1"
 	v1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -43,6 +32,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
 )
 
 type jsonPatchOperation struct {
@@ -980,39 +975,6 @@ func SetupInClusterClient() error {
 		}
 	}
 	return nil
-}
-
-// Watch blocks until either TLS cert & key updater or udi updater or HTTP server or termination signal generated
-func Watch(term chan os.Signal, kp, udi, server service.Service) (err error) {
-	signal.Notify(term, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
-	select {
-	case <-kp.StatusSignal(): // when TLS cert & key updater finishes
-		glog.Error("TLS key & cert updater ended")
-		err = CombineError(server.Quit(), udi.Quit())
-	case <-udi.StatusSignal(): // when UDI updater finishes
-	    glog.Error("UDI updater ends")
-	    err = CombineError(server.Quit(), kp.Quit())
-	case <-server.StatusSignal(): // when HTTP server finishes
-		glog.Error("HTTP server ended")
-		err = CombineError(kp.Quit(), udi.Quit())
-	case <-term: // when termination signal received
-		glog.Info("termination signal received")
-		err = CombineError(server.Quit(), kp.Quit(), udi.Quit())
-	}
-	return
-}
-
-// httpServerHandler limits HTTP server endpoint to /mutate and HTTP verb to POST only
-func httpServerHandler(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != mServerEndpoint {
-		http.NotFound(w, r)
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "Invalid HTTP verb requested", 405)
-		return
-	}
-	MutateHandler(w, r)
 }
 
 // CombineError combines errors into one error message

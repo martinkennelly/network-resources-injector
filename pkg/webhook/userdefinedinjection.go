@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/channel"
 	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/service"
 	"reflect"
@@ -15,15 +16,20 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const userDefinedInjectionConfigMap = "nri-user-defined-injections"
+const (
+	userDefinedInjectionConfigMap = "nri-user-defined-injections"
+	serviceName = "user defined injections updater"
+	chBufferSize = 1
+)
 
 type udiService struct {
-	status  *channel.Channel
-	quit    *channel.Channel
-	timeout time.Duration
-	interval time.Duration
+	status    *channel.Channel
+	quit      *channel.Channel
+	timeout   time.Duration
+	interval  time.Duration
 	namespace string
-	udi     *userDefinedInjections
+	name      string
+	udi       *userDefinedInjections
 }
 
 // package global needed due to http server calling a function (httpServerHandler) per request and unable to pass function args
@@ -33,7 +39,7 @@ var udiSvc *udiService
 func GetUDI(namespace string, interval, timeout time.Duration) service.Service {
 	if udiSvc == nil {
 		udiSvc = &udiService{udi: &userDefinedInjections{Patchs: make(map[string]jsonPatchOperation)}, namespace: namespace,
-			interval: interval, timeout: timeout}
+			interval: interval, timeout: timeout, name: serviceName}
 	}
 	return udiSvc
 }
@@ -41,10 +47,10 @@ func GetUDI(namespace string, interval, timeout time.Duration) service.Service {
 // Run will periodically update user defined injections from a config map. Quit must be called after Run.
 func (udi *udiService) Run() error {
 	if udi.status != nil && udi.status.IsOpen() {
-		return errors.New("customized injection service must have exited before attempting to run again")
+		return errors.New(fmt.Sprintf("%s must have exited before attempting to run again", udi.name))
 	}
-	udi.status = channel.NewChannel()
-	udi.quit = channel.NewChannel()
+	udi.status = channel.NewChannel(chBufferSize)
+	udi.quit = channel.NewChannel(chBufferSize)
 
 	go udi.monitorConfigMap()
 
@@ -52,7 +58,7 @@ func (udi *udiService) Run() error {
 }
 
 func (udi *udiService) monitorConfigMap() (err error) {
-	glog.Info("starting user defined injection service")
+	glog.Info(fmt.Sprintf("starting %s", udi.name))
 	udi.quit.Open()
 	udi.status.Open()
 	defer udi.status.Close()
@@ -72,7 +78,7 @@ func (udi *udiService) monitorConfigMap() (err error) {
 			}
 			udi.setUserDefinedInjections(cm)
 		case <-udi.quit.GetCh():
-			glog.Info("user defined injection service finished")
+			glog.Info(fmt.Sprintf("%s finished", udi.name))
 			return
 		}
 	}
@@ -80,7 +86,7 @@ func (udi *udiService) monitorConfigMap() (err error) {
 
 // Quit will stop updating the user define injections store
 func (udi *udiService) Quit() error {
-	glog.Info("terminating user defined injection service")
+	glog.Info(fmt.Sprintf("terminating %s", udi.name))
 	udi.quit.Close()
 	return udi.status.WaitUntilClosed(udi.timeout)
 }
@@ -91,6 +97,10 @@ func (udi *udiService) StatusSignal() chan struct{} {
 	return udi.status.GetCh()
 }
 
+// GetName return service name
+func (udi *udiService) GetName() string {
+	return udi.name
+}
 
 // setUserDefinedInjections sets additional injections to be applied in Pod spec
 func (udi *udiService) setUserDefinedInjections(injections *corev1.ConfigMap) {

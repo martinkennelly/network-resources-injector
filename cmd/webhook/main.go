@@ -16,7 +16,10 @@ package main
 
 import (
 	"flag"
-	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/tls"
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/ca"
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/keycert"
+	server2 "github.com/k8snetworkplumbingwg/network-resources-injector/pkg/server"
+	"github.com/k8snetworkplumbingwg/network-resources-injector/pkg/service"
 	"os"
 	"time"
 
@@ -35,7 +38,7 @@ const (
 
 func main() {
 	var namespace string
-	var clientCAPaths tls.ClientCAFlags
+	var clientCAPaths ca.ClientCAFlags
 	/* load configuration */
 	port := flag.Int("port", 8443, "The port on which to serve.")
 	address := flag.String("bind-address", "0.0.0.0", "The IP address on which to listen for the --port port.")
@@ -66,12 +69,12 @@ func main() {
 
 	glog.Infof("starting mutating admission controller for network resources injection")
 
-	keyPair, err := tls.NewTlsKeyPairReloader(*cert, *key)
+	keyPair, err := keycert.NewIdentity(*cert, *key)
 	if err != nil {
 		glog.Fatalf("error load certificate: %s", err.Error())
 	}
 
-	clientCaPool, err := tls.NewClientCertPool(&clientCAPaths, *insecure)
+	clientCaPool, err := ca.NewClientCertPool(&clientCAPaths, *insecure)
 	if err != nil {
 		glog.Fatalf("error loading client CA pool: '%s'", err.Error())
 	}
@@ -88,7 +91,7 @@ func main() {
 		glog.Fatalf("error trying to setup kubernetes client")
 	}
 
-	kp := webhook.NewKeyPair(keyPair, serviceTo)
+	kp := .NewKeyPair(keyPair, serviceTo)
 	if err = kp.Run(); err != nil {
 		glog.Fatalf("starting TLS key & cert file updater failed: '%s'", err.Error())
 	}
@@ -99,14 +102,14 @@ func main() {
 		glog.Fatalf("starting user defined injection updater failed: '%s'", err.Error())
 	}
 
-	server := webhook.NewMutateServer(*address, *port, *insecure, readTo, writeTo, readHeaderTo, serviceTo, clientCaPool, keyPair)
+	server := server2.NewMutateServer(*address, *port, *insecure, readTo, writeTo, readHeaderTo, serviceTo, clientCaPool, keyPair)
 	if err = server.Run(); err != nil {
 		err = webhook.CombineError(err, kp.Quit(), udi.Quit())
 		glog.Fatalf("starting HTTP server failed: '%s'", err.Error())
 	}
 
 	/* Blocks until termination or TLS key/cert file updater or UDI updater or HTTP server signal occurs */
-	if err := webhook.Watch(make(chan os.Signal, 1), kp, udi, server); err != nil {
+	if err := service.Watch(make(chan os.Signal, 1), kp, udi, server); err != nil {
 		glog.Error(err.Error())
 	}
 }
